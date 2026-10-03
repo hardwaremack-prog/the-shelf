@@ -1,0 +1,21 @@
+{
+  "name": "the-shelf",
+  "version": "1.0.0",
+  "description": "A local-network media shelf for sharing pictures, music, games, and programs.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "adm-zip": "^0.6.0",
+    "archiver": "^7.0.1",
+    "express": "^4.19.2",
+    "multer": "^2.3.0",
+    "node-taglib-sharp": "^6.0.3",
+    "xlsx": "^0.18.5"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

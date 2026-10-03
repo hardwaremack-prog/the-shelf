@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Shelf — Setup</title>
+<style>
+  :root {
+    --ink: #241B2F;
+    --ink-deep: #1B1424;
+    --surface: #322542;
+    --text: #F0E9E3;
+    --text-muted: #B7ABBA;
+    --accent: #F2B441;
+    --accent-ink: #2A1D0E;
+    --divider: #4A3B5C;
+    --mint: #6FCF97;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  .card {
+    background: var(--ink-deep);
+    border: 1px solid var(--divider);
+    border-radius: 14px;
+    padding: 32px;
+    max-width: 440px;
+    width: 100%;
+  }
+  h1 {
+    font-family: Georgia, serif;
+    font-size: 24px;
+    margin: 0 0 6px;
+  }
+  p.sub { color: var(--text-muted); font-size: 14px; margin: 0 0 24px; }
+  label.field-label {
+    display: block;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  input[type="text"] {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--divider);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-size: 14px;
+    margin-bottom: 18px;
+  }
+  .checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: var(--surface);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 22px;
+  }
+  .checkbox-row input { margin-top: 3px; width: 16px; height: 16px; }
+  .checkbox-row .label-text { font-size: 13.5px; line-height: 1.4; }
+  .checkbox-row .label-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  button#installBtn {
+    width: 100%;
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: none;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button#installBtn:hover { filter: brightness(1.05); }
+  button#installBtn:disabled { opacity: 0.6; cursor: default; }
+  .status { margin-top: 16px; font-size: 13.5px; }
+  .status.error { color: #E2725B; }
+  .status.success { color: var(--mint); }
+  .success-box a { color: var(--mint); }
+</style>
+</head>
+<body>
+
+<div class="card" id="card">
+  <h1>The Shelf — Setup</h1>
+  <p class="sub">This installs a copy on this computer and (optionally) starts it automatically.</p>
+
+  <div id="form">
+    <label class="field-label" for="installPath">Install location</label>
+    <input type="text" id="installPath" value="__DEFAULT_PATH__">
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="autostart" checked>
+      <div>
+        <div class="label-text">Start The Shelf automatically when this computer starts</div>
+        <div class="label-sub">You can turn this off later — see the README for how.</div>
+      </div>
+    </div>
+
+    <button id="installBtn">Install</button>
+    <div class="status" id="status"></div>
+  </div>
+</div>
+
+<script>
+document.getElementById('installBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('installBtn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  status.className = 'status';
+  status.textContent = 'Installing\u2026 this can take a moment.';
+
+  const installPath = document.getElementById('installPath').value;
+  const autostart = document.getElementById('autostart').checked;
+
+  // Copying node_modules can be genuinely slow on Windows if antivirus
+  // scans each file — update the message so a slow install doesn't look
+  // like a frozen one, and give up with a clear message if it truly hangs.
+  const slowNotice = setTimeout(() => {
+    status.textContent = 'Still working\u2026 this can take a couple of minutes on Windows if antivirus software is scanning the files. The terminal window behind this page shows live progress.';
+  }, 8000);
+
+  const controller = new AbortController();
+  const hardTimeout = setTimeout(() => controller.abort(), 4 * 60 * 1000);
+
+  try {
+    const res = await fetch('/do-install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ installPath, autostart }),
+      signal: controller.signal
+    });
+    clearTimeout(slowNotice);
+    clearTimeout(hardTimeout);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Something went wrong.');
+
+    const appUrl = `http://localhost:${data.appPort || 8080}`;
+
+    if (data.serverStarted) {
+      document.getElementById('form').innerHTML = `
+        <div class="success-box">
+          <p class="status success">Installed to ${data.installPath}.</p>
+          <p>The Shelf is starting up now. Open it at:</p>
+          <p><a href="${appUrl}" target="_blank">${appUrl}</a></p>
+          <p style="color:var(--text-muted); font-size:13px;">
+            Other devices on your network can use your computer's LAN address instead of
+            localhost — it's shown in the app's sidebar once it loads.
+          </p>
+        </div>
+      `;
+    } else {
+      const reasonText = data.reason === 'old-still-running'
+        ? `The files were updated, but an older copy of The Shelf is still running and this setup wasn't allowed to stop it &mdash; usually because it was started as a system service (for example with systemd and sudo). Stop that copy (for example <code>sudo systemctl restart theshelf</code> if that's how you set it up), or restart this computer, and the new version will run.`
+        : data.reason === 'port-taken-by-other'
+        ? `Something else on this computer is already using port ${data.appPort} — The Shelf couldn't start there. Close whatever that is (or set a different PORT), then try installing again.`
+        : `The files were installed, but The Shelf didn't respond after starting — it may need a moment, or may have hit an error. Try opening the link below in a few seconds; if that doesn't work, restart this computer and try installing again.`;
+      document.getElementById('form').innerHTML = `
+        <div class="success-box">
+          <p class="status error">Installed to ${data.installPath}, but couldn't confirm it started.</p>
+          <p>${reasonText}</p>
+          <p><a href="${appUrl}" target="_blank">${appUrl}</a></p>
+        </div>
+      `;
+    }
+  } catch (err) {
+    clearTimeout(slowNotice);
+    clearTimeout(hardTimeout);
+    status.className = 'status error';
+    status.textContent = err.name === 'AbortError'
+      ? 'This is taking far longer than expected (over 4 minutes) — something is likely stuck. Check the terminal window behind this page for an error, then close it and try again.'
+      : err.message;
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

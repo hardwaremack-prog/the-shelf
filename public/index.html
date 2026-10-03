@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Shelf</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="sidebar-scroll">
+      <div class="brand">
+        <div class="brand-mark">&#9724;&#9723;</div>
+        <div class="brand-text">
+          <h1>The Shelf</h1>
+          <p>your network's stuff, in one place</p>
+        </div>
+      </div>
+
+      <div class="power-toggle-group">
+        <div class="power-toggle" id="powerToggleRow">
+          <label class="toggle-switch">
+            <input type="checkbox" id="powerToggle" checked>
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="powerLabel">The Shelf is on</span>
+        </div>
+
+        <div class="power-toggle" id="localhostOnlyToggleRow" hidden>
+          <label class="toggle-switch">
+            <input type="checkbox" id="localhostOnlyToggle">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="localhostOnlyLabel" title="While on, only this computer can reach The Shelf -- everyone else on the network is turned away">Local computer only</span>
+        </div>
+
+        <div class="power-toggle" id="secureModeToggleRow" hidden>
+          <label class="toggle-switch">
+            <input type="checkbox" id="secureModeToggle">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="secureModeLabel">Anonymous read only</span>
+          <button class="accounts-gear-btn" id="accountsGearBtn" title="Set up users and passwords" aria-label="Manage accounts">&#9881;</button>
+        </div>
+
+        <div class="power-toggle" id="openWriteToggleRow" hidden>
+          <label class="toggle-switch">
+            <input type="checkbox" id="openWriteToggle">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="openWriteLabel" title="While on, anyone on the network can add, change, or remove things -- and use the AI tab -- without logging in">Anyone can edit + AI</span>
+        </div>
+      </div>
+
+      <nav class="shelf-nav" id="shelfNav">
+        <!-- categories injected here -->
+      </nav>
+
+      <div class="nav-divider">Tools</div>
+      <nav class="shelf-nav tool-nav" id="toolNav">
+        <!-- tool tabs injected here -->
+      </nav>
+    </div>
+
+    <button class="upload-btn" id="openUploadBtn">
+      <span class="plus">+</span> Add something
+    </button>
+
+    <div class="auth-indicator" id="authIndicator" hidden></div>
+
+    <div class="network-info" id="networkInfo">
+      <div class="status-dot"></div>
+      <div>
+        <div class="network-label">Share this address</div>
+        <div class="network-url" id="networkUrl">detecting&hellip;</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="main-header">
+      <div>
+        <h2 id="categoryTitle">Pictures</h2>
+        <p class="category-sub" id="categorySub">0 items</p>
+      </div>
+      <div class="header-actions">
+        <button class="about-info-btn" id="aboutInfoBtn" hidden title="About The Shelf">&#9432;</button>
+        <div class="search-box-wrap">
+          <input type="search" id="searchBox" placeholder="Filter by name&hellip;">
+          <button class="search-clear-btn" id="searchClearBtn" hidden aria-label="Clear search">&times;</button>
+        </div>
+        <select id="playCountFilter" hidden>
+          <option value="">All plays</option>
+          <option value="0">Never played</option>
+          <option value="1+">Played 1+ times</option>
+          <option value="5+">Played 5+ times</option>
+          <option value="10+">Played 10+ times</option>
+          <option value="25+">Played 25+ times</option>
+        </select>
+        <button class="slideshow-btn" id="slideshowBtn" hidden>Start slideshow</button>
+        <button class="tool-action-btn" id="shuffleAllBtn" hidden title="Play these songs in random order">Shuffle play</button>
+        <button class="tool-action-btn" id="imagineBtn" hidden title="Describe a picture and Pollinations.ai draws it">Create with AI</button>
+        <div class="header-tool-actions">
+          <button class="tool-action-btn" id="standardizeNamesBtn" hidden title="Clean up messy auto-downloaded filenames">Standardize names</button>
+          <button class="tool-action-btn" id="fetchArtBtn" hidden title="Look up cover art for tracks that don't have it yet">Get album art</button>
+          <button class="tool-action-btn tool-action-btn-secondary" id="clearArtBtn" hidden title="Delete all cached album art so it can be re-fetched">Clear album art</button>
+          <button class="tool-action-btn tool-action-btn-secondary" id="exportListBtn" hidden title="Download the whole library as a zip, or the song list as a spreadsheet">Export&hellip;</button>
+          <button class="tool-action-btn" id="fetchThumbsBtn" hidden title="Generate a thumbnail for items that don't have one yet">Get thumbnails</button>
+          <button class="tool-action-btn tool-action-btn-secondary" id="clearThumbsBtn" hidden title="Delete all generated thumbnails so they can be re-generated">Clear thumbnails</button>
+          <button class="tool-action-btn tool-action-btn-secondary" id="removeDuplicatesBtn" hidden title="Find files with identical content and remove the extra copies">Remove duplicates</button>
+        </div>
+        <button class="tool-action-btn" id="toolActionBtn" hidden>+ New</button>
+      </div>
+    </header>
+
+    <div class="bulk-progress-bar" id="bulkProgressBar" hidden>
+      <div class="bulk-progress-fill" id="bulkProgressFill"></div>
+      <div class="bulk-progress-label" id="bulkProgressLabel"></div>
+    </div>
+
+    <section class="content" id="content">
+      <!-- category content injected here -->
+    </section>
+  </main>
+
+</div>
+
+<!-- Create a picture with Pollinations.ai (Pictures shelf) -->
+<div class="modal-backdrop" id="imagineBackdrop" hidden>
+  <div class="modal imagine-modal">
+    <div class="modal-head">
+      <h3>Create a picture</h3>
+      <button class="icon-btn" id="closeImagineBtn" aria-label="Close">&times;</button>
+    </div>
+
+    <div id="imagineKeyPanel" hidden>
+      <p class="imagine-text" id="imagineKeyText"></p>
+      <div class="imagine-key-form" id="imagineKeyForm">
+        <input type="password" id="imagineKeyInput" placeholder="Paste your secret key (sk_&hellip;)" autocomplete="off" spellcheck="false">
+        <button class="tool-action-btn" id="imagineKeySave">Save key</button>
+      </div>
+      <p class="imagine-status" id="imagineKeyStatus"></p>
+    </div>
+
+    <div id="imagineMainPanel" hidden>
+      <label class="field-label" for="imaginePrompt">Describe the picture</label>
+      <textarea id="imaginePrompt" rows="3" maxlength="1000" placeholder="A cozy cabin in snowy woods at dusk, warm light in the windows"></textarea>
+      <div class="imagine-shapes" role="group" aria-label="Shape">
+        <button type="button" class="imagine-shape" data-shape="square" aria-pressed="true">Square</button>
+        <button type="button" class="imagine-shape" data-shape="wide" aria-pressed="false">Wide</button>
+        <button type="button" class="imagine-shape" data-shape="tall" aria-pressed="false">Tall</button>
+      </div>
+      <div class="imagine-stage" id="imagineStage">
+        <img id="imagineImg" alt="" hidden>
+        <div class="imagine-placeholder" id="imaginePlaceholder">Your picture will appear here.</div>
+      </div>
+      <p class="imagine-status" id="imagineStatus"></p>
+      <div class="imagine-actions">
+        <button class="tool-action-btn" id="imagineCreateBtn">Create</button>
+        <button class="tool-action-btn" id="imagineKeepBtn" hidden>Yes, add to Pictures</button>
+        <button class="tool-action-btn tool-action-btn-secondary" id="imagineNextBtn" hidden>No, try another</button>
+      </div>
+      <p class="imagine-footnote">Your description is sent to Pollinations.ai, an online service, to draw the picture.
+        <button class="link-btn" id="imagineChangeKey" hidden>Change API key</button></p>
+    </div>
+  </div>
+</div>
+
+<!-- Backup chooser: pick which parts of The Shelf go into the backup zip -->
+<div class="modal-backdrop" id="backupBackdrop" hidden>
+  <div class="modal backup-modal">
+    <div class="modal-head">
+      <h3>What should the backup include?</h3>
+      <button class="icon-btn" id="closeBackupBtn" aria-label="Close">&times;</button>
+    </div>
+    <div class="backup-select-row">
+      <button class="link-btn" id="backupSelectAll">Select all</button>
+      <button class="link-btn" id="backupSelectNone">Select none</button>
+    </div>
+    <div class="backup-section-list" id="backupSectionList"></div>
+    <div class="backup-footer">
+      <span class="backup-total" id="backupTotal"></span>
+      <button class="tool-action-btn" id="backupDownloadBtn">Download backup</button>
+    </div>
+  </div>
+</div>
+
+<!-- Export choice: whole library as a zip, or the song list as a spreadsheet -->
+<div class="modal-backdrop" id="exportBackdrop" hidden>
+  <div class="modal export-modal">
+    <div class="modal-head">
+      <h3>Export your music</h3>
+      <button class="icon-btn" id="closeExportBtn" aria-label="Close">&times;</button>
+    </div>
+    <div class="export-choices">
+      <button class="export-choice" id="exportZipBtn">
+        <span class="export-choice-title">Complete library (.zip)</span>
+        <span class="export-choice-sub" id="exportZipSub">Every song file in one download</span>
+      </button>
+      <button class="export-choice" id="exportSheetBtn">
+        <span class="export-choice-title">Song list (Excel)</span>
+        <span class="export-choice-sub">A spreadsheet of song names, plays, sizes and dates A spreadsheet of names, artists, sizes and plays &mdash; no audiomdash; no audio</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Upload panel -->
+<div class="modal-backdrop" id="uploadBackdrop" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h3>Add something to the shelf</h3>
+      <button class="icon-btn" id="closeUploadBtn" aria-label="Close">&times;</button>
+    </div>
+
+    <label class="field-label" for="categorySelect">Which shelf does it belong on?</label>
+    <select id="categorySelect">
+      <option value="Pictures">Pictures</option>
+      <option value="Music">Music</option>
+      <option value="Videos">Videos</option>
+      <option value="Games">Games</option>
+      <option value="Programs">Programs</option>
+      <option value="Books">Books / PDFs</option>
+    </select>
+
+    <div class="dropzone" id="dropzone">
+      <p><strong>Drop files here</strong> or click to choose</p>
+      <p class="dropzone-sub">Games and programs: zip up folders first.</p>
+      <input type="file" id="fileInput" multiple hidden>
+    </div>
+
+    <ul class="upload-list" id="uploadList"></ul>
+  </div>
+
+  <!-- Shared picker for setting a custom thumbnail image on a Games,
+       Programs, or Books item -- one hidden input reused for whichever
+       card's "set thumbnail" button was clicked. -->
+  <input type="file" id="thumbPickerInput" accept="image/*" hidden>
+</div>
+
+<!-- Slideshow overlay -->
+<div class="slideshow-overlay" id="slideshowOverlay" hidden>
+  <div class="slideshow-frame">
+    <img id="slideshowImg" alt="">
+  </div>
+  <div class="slideshow-caption" id="slideshowCaption"></div>
+
+  <button class="slide-nav prev" id="slidePrev" aria-label="Previous">&#8249;</button>
+  <button class="slide-nav next" id="slideNext" aria-label="Next">&#8250;</button>
+  <button class="slide-close" id="slideClose" aria-label="Close">&times;</button>
+
+  <div class="slide-controls">
+    <button id="slidePlayPause">Pause</button>
+    <button id="slideFullscreen">Fullscreen</button>
+    <label class="speed-label">
+      Seconds per photo
+      <input type="range" id="slideSpeed" min="2" max="15" step="1" value="4">
+      <span id="slideSpeedVal">4s</span>
+    </label>
+    <label class="ken-burns-label">
+      <input type="checkbox" id="kenBurnsToggle" checked>
+      Ken Burns effect
+    </label>
+    <div class="slide-volume-control" title="Music volume">
+      <button id="slideMuteBtn" aria-label="Mute">&#128266;</button>
+      <input type="range" id="slideVolumeSlider" min="0" max="100" value="80" aria-label="Music volume">
+      <button id="slideSkipTrackBtn" title="Skip to next song" aria-label="Skip to next song">&#9197;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Photo editor overlay -->
+<div class="photo-editor-overlay" id="photoEditorOverlay" hidden>
+  <div class="photo-editor-panel">
+    <div class="photo-editor-header">
+      <span id="photoEditorTitle">Edit photo</span>
+      <button class="slide-close" id="peClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="photo-editor-canvas-wrap">
+      <canvas id="photoEditorCanvas"></canvas>
+    </div>
+    <div class="photo-editor-controls">
+      <div class="photo-editor-btn-row">
+        <button id="peRotateLeft" title="Rotate left">&#8634; Rotate left</button>
+        <button id="peRotateRight" title="Rotate right">&#8635; Rotate right</button>
+        <button id="peFlipH" title="Flip horizontal">&#8646; Flip H</button>
+        <button id="peFlipV" title="Flip vertical">&#8645; Flip V</button>
+        <button id="peReset" title="Undo all changes">Reset</button>
+      </div>
+      <div class="photo-editor-sliders">
+        <label>Brightness <input type="range" id="peBrightness" min="40" max="160" value="100"></label>
+        <label>Contrast <input type="range" id="peContrast" min="40" max="160" value="100"></label>
+        <label>Saturation <input type="range" id="peSaturation" min="0" max="200" value="100"></label>
+      </div>
+      <div class="photo-editor-actions">
+        <button id="peCancel">Cancel</button>
+        <button id="peSaveCopy">Save as copy</button>
+        <button id="peSaveOverwrite" class="primary">Save</button>
+      </div>
+      <p class="photo-editor-status" id="photoEditorStatus"></p>
+    </div>
+  </div>
+</div>
+
+<!-- Music tag editor overlay -->
+<div class="photo-editor-overlay" id="tagEditorOverlay" hidden>
+  <div class="photo-editor-panel tag-editor-panel">
+    <div class="photo-editor-header">
+      <span id="tagEditorTitle">Edit tags</span>
+      <button class="slide-close" id="teClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="tag-editor-file">
+      <div class="tag-editor-file-row">
+        <span class="tag-editor-file-label">File</span>
+        <button class="link-btn" id="teCopyName" type="button">Copy</button>
+      </div>
+      <div class="tag-editor-file-name" id="teFileName"></div>
+      <button class="tag-editor-fill" id="teFillFromName" type="button">Fill in from file name</button>
+    </div>
+    <div class="tag-editor-fields">
+      <label>Artist <input type="text" id="teArtist" placeholder="Artist"></label>
+      <label>Title <input type="text" id="teTitle" placeholder="Title"></label>
+      <label>Album <input type="text" id="teAlbum" placeholder="Album (optional)"></label>
+      <label>Track # <input type="text" id="teTrack" placeholder="e.g. 3" inputmode="numeric"></label>
+    </div>
+    <p class="tag-editor-hint">These are the song's own tags — the same info other music apps and devices read. Fixing the artist here is what fixes the wrong cover art getting matched.</p>
+    <div class="photo-editor-actions">
+      <button id="teCancel">Cancel</button>
+      <button id="teSaveAndRefetchArt">Save &amp; fix album art</button>
+      <button id="teSave" class="primary">Save</button>
+    </div>
+    <p class="photo-editor-status" id="tagEditorStatus"></p>
+  </div>
+</div>
+
+<!-- About This Shelf overlay -->
+<div class="about-overlay" id="aboutOverlay" hidden>
+  <div class="about-panel">
+    <button class="slide-close" id="aboutClose" aria-label="Close">&times;</button>
+    <h2>About The Shelf</h2>
+    <p id="aboutText"></p>
+  </div>
+</div>
+
+<!-- Login overlay -->
+<div class="about-overlay" id="loginOverlay" hidden>
+  <div class="about-panel login-panel">
+    <button class="slide-close" id="loginClose" aria-label="Close">&times;</button>
+    <h2>Log in</h2>
+    <p id="loginIntro" style="color:var(--text-muted); font-size:13px; margin:0 0 16px;">
+      This Shelf requires an account to make changes. You can keep browsing without one.
+    </p>
+    <form id="loginForm">
+      <input type="text" id="loginUsername" placeholder="Username" required autocomplete="username">
+      <input type="password" id="loginPassword" placeholder="Password" required autocomplete="current-password">
+      <button type="submit" class="tool-btn">Log in</button>
+    </form>
+    <div class="status" id="loginStatus"></div>
+  </div>
+</div>
+
+<!-- Manage accounts overlay -->
+<div class="about-overlay" id="accountsOverlay" hidden>
+  <div class="about-panel accounts-panel">
+    <button class="slide-close" id="accountsClose" aria-label="Close">&times;</button>
+    <h2>Accounts</h2>
+    <p style="color:var(--text-muted); font-size:13px; margin:0 0 16px;">
+      Once you add at least one account, anyone connecting from another device has to log in
+      to make changes — browsing stays open to everyone either way, unless "Secured visitors"
+      is also switched on. This machine always has full access, no login needed.
+    </p>
+    <div class="user-list" id="userList"><p style="color:var(--text-muted); font-size:13px;">Loading&hellip;</p></div>
+    <form class="add-user-form" id="addUserForm">
+      <input type="text" id="newUserUsername" placeholder="Username" required>
+      <input type="password" id="newUserPassword" placeholder="Password (4+ characters)" required minlength="4">
+      <select id="newUserRole">
+        <option value="write">Can make changes</option>
+        <option value="read">Read only</option>
+      </select>
+      <button type="submit" class="tool-btn">Add account</button>
+    </form>
+    <div class="status" id="userStatus"></div>
+  </div>
+</div>
+
+<!-- Presentation player overlay -->
+<div class="present-overlay" id="presentOverlay" hidden>
+  <button class="slide-close" id="presentClose" aria-label="Close">&times;</button>
+  <div class="present-slide" id="presentSlide">
+    <h2 id="presentHeading"></h2>
+    <img id="presentImage" alt="" hidden>
+    <div id="presentBody"></div>
+  </div>
+  <button class="slide-nav prev" id="presentPrev" aria-label="Previous">&#8249;</button>
+  <button class="slide-nav next" id="presentNext" aria-label="Next">&#8250;</button>
+  <div class="present-counter" id="presentCounter"></div>
+</div>
+
+<!-- Sticky note hover tooltip (bulletin board) -->
+<div class="sticky-tooltip" id="stickyTooltip" hidden></div>
+<div class="art-preview" id="artPreview" hidden><img id="artPreviewImg" src="" alt="Album art"></div>
+
+<audio id="audioPlayer"></audio>
+<div class="mini-player" id="miniPlayer" hidden>
+  <span class="mini-art" id="miniArt">
+    <img id="miniArtImg" src="" alt="" hidden>
+    <span class="track-art-placeholder" id="miniArtPlaceholder">&#9834;</span>
+  </span>
+  <button id="miniPlayPause">&#9658;</button>
+  <canvas id="miniVisualizer" width="120" height="34" title="Double-click for fullscreen"></canvas>
+  <div class="mini-info">
+    <div class="mini-title" id="miniTitle">&mdash;</div>
+    <input type="range" id="miniSeek" min="0" max="100" value="0">
+  </div>
+  <div class="volume-control">
+    <button id="muteBtn" aria-label="Mute">&#128266;</button>
+    <input type="range" id="volumeSlider" min="0" max="100" value="80" aria-label="Volume">
+  </div>
+  <button class="mini-shuffle" id="miniShuffleBtn" aria-label="Shuffle" aria-pressed="false" title="Shuffle is off">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
+  </button>
+  <button class="mini-collapse" id="miniCollapseBtn" aria-label="Minimize player" title="Minimize player">&#9662;</button>
+  <button class="mini-close" id="miniPlayerClose" aria-label="Close player">&times;</button>
+</div>
+
+<!-- Fullscreen visualizer overlay -->
+<div class="fullscreen-viz-overlay" id="fullscreenVizOverlay" hidden>
+  <canvas id="fullscreenVisualizer"></canvas>
+  <div class="fullscreen-viz-top-fade"></div>
+  <div class="fullscreen-viz-bottom-fade"></div>
+  <button class="fullscreen-viz-back" id="fullscreenVizClose">&#8249; Back</button>
+  <img class="fullscreen-viz-art" id="fullscreenVizArt" alt="" hidden>
+  <div class="fullscreen-viz-title" id="fullscreenVizTitle">&mdash;</div>
+  <div class="fullscreen-viz-style-hint" id="fullscreenVizStyleHint">Click anywhere to change the visualization</div>
+  <div class="fullscreen-viz-controls">
+    <button id="vizPlayPause" aria-label="Play/pause">&#10074;&#10074;</button>
+    <button id="vizNextTrack" title="Next track" aria-label="Next track">&#9197;</button>
+    <button id="vizMuteBtn" aria-label="Mute">&#128266;</button>
+    <input type="range" id="vizVolumeSlider" min="0" max="100" value="80" aria-label="Volume">
+    <input type="range" id="vizColorSlider" class="viz-color-slider" min="0" max="100" value="0" title="Visualizer color: orange to green" aria-label="Visualizer color, orange to green">
+  </div>
+</div>
+
+<!-- Floating video player -->
+<div class="video-player" id="videoPlayer" hidden>
+  <div class="video-player-bar">
+    <span class="video-player-title" id="videoPlayerTitle">&mdash;</span>
+    <a id="videoDownloadLink" href="#" download title="Download">&#8681;</a>
+    <button id="videoPlayerClose" aria-label="Close">&times;</button>
+  </div>
+  <video id="videoPlayerEl" controls></video>
+</div>
+
+<!-- Vendored locally (not a CDN) so Books thumbnails still work with no
+     internet connection -- renders a PDF's first page to a canvas so it
+     can be captured as a thumbnail the same way a video frame is. -->
+<script src="vendor/pdfjs/pdf.min.js"></script>
+<script>
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
+  }
+</script>
+<script src="app.js"></script>
+</body>
+</html>
