@@ -13,6 +13,8 @@ network, including the AI tab (it downloads a small model once, then runs fully 
 (The one exception is the optional weather reading on the Home tab, which needs this
 computer to have internet access — see below.)
 
+![The Shelf screenshot](<docs/The Shelf - screenshot.png>)
+
 ## What you need
 
 - [Node.js](https://nodejs.org) installed on the computer that will host it (the "server").
