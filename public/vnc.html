@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Remote desktop — The Shelf</title>
+<style>
+  :root {
+    --ink: #241B2F; --ink-deep: #1B1424; --surface: #322542; --surface-hover: #3D2D53;
+    --text: #F0E9E3; --text-muted: #B7ABBA; --accent: #F2B441; --accent-ink: #2A1D0E;
+    --mint: #6FCF97; --coral: #E2725B; --divider: #4A3B5C;
+    --serif: Georgia, 'Times New Roman', serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--ink-deep); color: var(--text); font-family: var(--sans); display: flex; flex-direction: column; }
+  [hidden] { display: none !important; }
+  header {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px;
+    background: var(--ink); border-bottom: 1px solid var(--divider);
+  }
+  .who { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
+  .who-name { font-family: var(--serif); font-size: 17px; font-weight: 700; }
+  .who-addr { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .state { font-size: 12.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .state.on .dot { background: var(--mint); }
+  .state.bad .dot { background: var(--coral); }
+  button, .btn {
+    background: var(--surface); color: var(--text); border: 1px solid var(--divider); border-radius: 8px;
+    padding: 7px 12px; font: inherit; font-size: 13px; cursor: pointer; text-decoration: none; white-space: nowrap;
+  }
+  button:hover, .btn:hover { background: var(--surface-hover); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  label.check { font-size: 13px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  label.check input { accent-color: var(--accent); }
+  main { flex: 1; min-height: 0; position: relative; display: flex; }
+  #screen { flex: 1; min-width: 0; min-height: 0; background: #000; }
+  .panel {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px;
+    background: var(--ink-deep);
+  }
+  .card {
+    background: var(--ink); border: 1px solid var(--divider); border-radius: 14px; padding: 24px;
+    width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .card h2 { font-family: var(--serif); font-size: 20px; margin: 0; }
+  .card p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text); }
+  .card p.muted { color: var(--text-muted); font-size: 13px; }
+  .card ul { margin: 0; padding-left: 20px; font-size: 13.5px; line-height: 1.6; }
+  .card code { background: var(--surface); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  input[type=text], input[type=password], input[type=number] {
+    width: 100%; background: var(--surface); border: 1px solid var(--divider); color: var(--text);
+    border-radius: 8px; padding: 9px 12px; font: inherit; font-size: 16px;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  .field { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--text-muted); }
+  .error { color: var(--coral); font-size: 13.5px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="who">
+    <span class="who-name" id="whoName">Remote desktop</span>
+    <span class="who-addr" id="whoAddr"></span>
+  </div>
+  <span class="state" id="state"><span class="dot"></span><span id="stateText">Getting ready&hellip;</span></span>
+  <label class="check"><input type="checkbox" id="scaleToggle" checked> Fit to window</label>
+  <label class="check"><input type="checkbox" id="viewOnlyToggle"> View only</label>
+  <button id="cadBtn" disabled title="Send Ctrl+Alt+Del to the remote computer">Ctrl+Alt+Del</button>
+  <button id="fullBtn" title="Full screen">Full screen</button>
+  <button id="disconnectBtn" disabled>Disconnect</button>
+</header>
+<main>
+  <div id="screen"></div>
+
+  <div class="panel" id="msgPanel" hidden>
+    <div class="card" id="msgCard"></div>
+  </div>
+
+  <div class="panel" id="loginPanel" hidden>
+    <form class="card" id="loginForm" autocomplete="off">
+      <h2>Log in to <span id="loginWho"></span></h2>
+      <p class="muted">This is that computer's own VNC login &mdash; it goes straight to it, and The Shelf never stores it.</p>
+      <label class="field" id="userField" hidden>Username<input type="text" id="userInput" autocomplete="username" spellcheck="false"></label>
+      <label class="field">Password<input type="password" id="passInput" autocomplete="current-password"></label>
+      <div class="row"><button class="primary" type="submit">Connect</button><button type="button" id="loginCancel">Cancel</button></div>
+    </form>
+  </div>
+</main>
+
+<script type="module">
+import RFB from './vendor/novnc/core/rfb.js';
+
+const params = new URLSearchParams(location.search);
+const peer = params.get('peer') || '';
+const name = params.get('name') || 'Remote computer';
+let port = Number(params.get('port')) || 5900;
+let ip = params.get('ip') || '';
+let rfb = null;
+let wantDisconnect = false;
+
+const $ = (id) => document.getElementById(id);
+document.title = `${name} — Remote desktop`;
+$('whoName').textContent = name;
+$('loginWho').textContent = name;
+const showAddr = () => { $('whoAddr').textContent = ip ? `${ip} · VNC port ${port}` : `VNC port ${port}`; };
+showAddr();
+
+function setState(text, kind = '') {
+  $('stateText').textContent = text;
+  $('state').className = `state ${kind}`;
+}
+
+// VNC login methods (RFB security types). Some need the browser's built-in
+// encryption, which browsers only switch on for secure pages -- https, or
+// The Shelf opened on this same computer (localhost).
+const WORKS_ANYWHERE = new Set([1, 2, 16, 19, 22, 113, 256]); // none, VNC password, Tight, VeNCrypt, XVP, MS-Logon II, Plain
+const NEEDS_SECURE = new Set([6, 30]);                         // RealVNC/WayVNC encrypted login (RA2ne), Apple Screen Sharing (ARD)
+const TYPE_NAMES = { 1: 'no password', 2: 'VNC password', 5: 'RealVNC encrypted login', 6: 'RealVNC / Raspberry Pi encrypted login',
+  16: 'Tight', 18: 'TLS', 19: 'VeNCrypt', 22: 'XVP', 30: 'Apple Screen Sharing', 113: 'MS-Logon II', 129: 'Unix login', 256: 'Plain' };
+
+function vncAppLink() { return ip ? `vnc://${ip}:${port}` : null; }
+
+function showMessage(html) {
+  $('loginPanel').hidden = true;
+  $('msgCard').innerHTML = html;
+  $('msgPanel').hidden = false;
+  const retry = $('retryBtn'); if (retry) retry.addEventListener('click', () => start());
+  const portForm = $('portForm');
+  if (portForm) portForm.addEventListener('submit', (e) => { e.preventDefault(); port = Number($('portInput').value) || 5900; showAddr(); start(); });
+}
+
+function appLinkHtml() {
+  const link = vncAppLink();
+  return link ? `<a class="btn" href="${link}">Open in a VNC app instead</a>` : '';
+}
+
+function portFormHtml() {
+  return `<form class="row" id="portForm" style="align-items:flex-end">
+      <label class="field" style="flex:1">VNC port<input type="number" id="portInput" min="5900" max="5999" value="${port}"></label>
+      <button class="primary" type="submit">Try again</button>
+    </form>`;
+}
+
+async function start() {
+  $('msgPanel').hidden = true;
+  setState('Checking that computer…');
+  let probe;
+  try {
+    const res = await fetch(`/api/vnc/${encodeURIComponent(peer)}/probe?port=${port}`);
+    probe = await res.json();
+    if (!res.ok) throw new Error(probe.error || 'Could not check that computer.');
+  } catch (err) {
+    setState('Not connected', 'bad');
+    return showMessage(`<h2>Can't open a remote desktop</h2><p>${escapeHtml(err.message)}</p>`);
+  }
+  ip = probe.ip || ip; showAddr();
+
+  if (!probe.ok) {
+    setState('Not connected', 'bad');
+    const why = {
+      refused: `Nothing is accepting VNC connections on port ${port} there.`,
+      timeout: `That computer didn't answer on port ${port}.`,
+      unreachable: `That computer couldn't be reached on the network.`,
+      'not-vnc': `Something answered on port ${port}, but it isn't a VNC server.`,
+    }[probe.error] || `The connection closed before VNC answered.`;
+    return showMessage(`<h2>No VNC on ${escapeHtml(name)}</h2><p>${why}</p>
+      <ul><li><strong>Raspberry Pi:</strong> run <code>sudo raspi-config</code> &rarr; Interface Options &rarr; VNC &rarr; Enable.</li>
+      <li><strong>Mac:</strong> System Settings &rarr; General &rarr; Sharing &rarr; Screen Sharing.</li>
+      <li><strong>Windows:</strong> install a VNC server such as TightVNC or RealVNC Server.</li></ul>
+      <p class="muted">Most VNC servers use port 5900. A second screen or session is often 5901.</p>${portFormHtml()}`);
+  }
+
+  const types = probe.types || [];
+  const usable = types.filter(t => WORKS_ANYWHERE.has(t) || (NEEDS_SECURE.has(t) && window.isSecureContext));
+  if (!usable.length) {
+    setState('Not connected', 'bad');
+    const offered = types.map(t => TYPE_NAMES[t] || `type ${t}`).join(', ') || 'none';
+    const secureOnly = types.some(t => NEEDS_SECURE.has(t)) && !window.isSecureContext;
+    return showMessage(`<h2>That VNC login can't be used from here</h2>
+      <p>${escapeHtml(name)}'s VNC server only offers: <strong>${escapeHtml(offered)}</strong>.</p>
+      ${secureOnly ? `<p>That kind of login needs the browser's built-in encryption, which browsers only turn on for secure pages &mdash;
+        and this page was opened over the network as plain <code>http://</code>. Any of these will work:</p>
+      <ul><li>Open The Shelf <strong>on the host computer itself</strong> and connect from there.</li>
+        <li>Switch that computer's VNC to a <strong>VNC password</strong> login (RealVNC Server: Options &rarr; Security &rarr; Authentication &rarr; VNC password; Encryption &rarr; Prefer off).</li>
+        <li>Use a VNC app instead (the button below).</li></ul>`
+      : `<p>The browser viewer doesn't support that login method. A VNC app should.</p>`}
+      <div class="row">${appLinkHtml()}<button id="retryBtn">Check again</button></div>`);
+  }
+
+  connect();
+}
+
+function connect() {
+  setState('Connecting…');
+  wantDisconnect = false;
+  const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/vnc/${encodeURIComponent(peer)}/ws?port=${port}`;
+  rfb = new RFB($('screen'), wsUrl, { wsProtocols: ['binary'] });
+  rfb.scaleViewport = $('scaleToggle').checked;
+  rfb.viewOnly = $('viewOnlyToggle').checked;
+  rfb.resizeSession = false;
+  rfb.addEventListener('connect', () => {
+    $('loginPanel').hidden = true; $('msgPanel').hidden = true;
+    setState('Connected', 'on');
+    $('cadBtn').disabled = false; $('disconnectBtn').disabled = false;
+    rfb.focus();
+  });
+  rfb.addEventListener('disconnect', (e) => {
+    $('cadBtn').disabled = true; $('disconnectBtn').disabled = true;
+    rfb = null;
+    if (wantDisconnect) {
+      setState('Disconnected');
+      return showMessage(`<h2>Disconnected</h2><p>You closed the connection to ${escapeHtml(name)}.</p><div class="row"><button class="primary" id="retryBtn">Connect again</button></div>`);
+    }
+    if (!$('msgPanel').hidden) return; // a login failure already explained itself
+    setState('Disconnected', 'bad');
+    showMessage(`<h2>Connection ended</h2><p>${e.detail && e.detail.clean ? `${escapeHtml(name)} closed the connection.` : `The connection to ${escapeHtml(name)} was lost.`}</p>
+      <div class="row"><button class="primary" id="retryBtn">Reconnect</button>${appLinkHtml()}</div>`);
+  });
+  rfb.addEventListener('credentialsrequired', (e) => {
+    const types = (e.detail && e.detail.types) || ['password'];
+    setState('Waiting for login');
+    $('userField').hidden = !types.includes('username');
+    $('passInput').value = '';
+    $('loginPanel').hidden = false;
+    (types.includes('username') ? $('userInput') : $('passInput')).focus();
+  });
+  rfb.addEventListener('securityfailure', (e) => {
+    setState('Login failed', 'bad');
+    const reason = e.detail && e.detail.reason;
+    showMessage(`<h2>Login didn't work</h2><p>${reason ? escapeHtml(reason) : `${escapeHtml(name)} turned down the username or password.`}</p>
+      <div class="row"><button class="primary" id="retryBtn">Try again</button></div>`);
+  });
+  rfb.addEventListener('desktopname', (e) => {
+    if (e.detail && e.detail.name) $('whoAddr').textContent = `${ip ? ip + ' · ' : ''}${e.detail.name}`;
+  });
+}
+
+$('loginForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!rfb) return;
+  const creds = { password: $('passInput').value };
+  if (!$('userField').hidden) creds.username = $('userInput').value;
+  $('loginPanel').hidden = true;
+  setState('Logging in…');
+  rfb.sendCredentials(creds);
+});
+$('loginCancel').addEventListener('click', () => { wantDisconnect = true; if (rfb) rfb.disconnect(); $('loginPanel').hidden = true; });
+$('scaleToggle').addEventListener('change', (e) => { if (rfb) rfb.scaleViewport = e.target.checked; });
+$('viewOnlyToggle').addEventListener('change', (e) => { if (rfb) rfb.viewOnly = e.target.checked; });
+$('cadBtn').addEventListener('click', () => { if (rfb) rfb.sendCtrlAltDel(); });
+$('disconnectBtn').addEventListener('click', () => { wantDisconnect = true; if (rfb) rfb.disconnect(); });
+$('fullBtn').addEventListener('click', () => {
+  const main = document.querySelector('main');
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else if (main.requestFullscreen) main.requestFullscreen().catch(() => {});
+});
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+if (!peer) {
+  setState('Not connected', 'bad');
+  showMessage('<h2>No computer chosen</h2><p>Open this from the Messages list in The Shelf.</p>');
+} else {
+  start();
+}
+</script>
+</body>
+</html>

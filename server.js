@@ -6,6 +6,8 @@ const dns = require('dns');
 const os = require('os');
 const crypto = require('crypto');
 const dgram = require('dgram');
+const net = require('net');
+const { WebSocketServer } = require('ws');
 const { execFile } = require('child_process');
 const AdmZip = require('adm-zip');
 const archiver = require('archiver');
@@ -223,6 +225,38 @@ function loadIdentity() {
 
 const identity = loadIdentity();
 
+// Each Shelf's messaging identity belongs to ONE computer. It lives in
+// data/messaging/identity.json, which a backup has always included -- so
+// setting up a second computer from another's backup used to give both the
+// same identity, and each then ignored the other ("that's me") while
+// everyone else saw the two as a single entry. Now the identity remembers
+// which computer it was made on (its network hardware addresses, or its
+// name if those aren't available); if it turns up on a different computer,
+// that computer takes a fresh identity of its own. Old identities without
+// this record just get it added -- and a clash that already exists is
+// caught at runtime instead (see handleIdentityClash).
+function machineRecord() {
+  const macs = [...new Set(Object.values(os.networkInterfaces()).flat()
+    .filter(i => i && !i.internal && i.mac && i.mac !== '00:00:00:00:00:00').map(i => i.mac.toLowerCase()))].sort();
+  return { hostname: os.hostname(), macs };
+}
+(function claimIdentityForThisComputer() {
+  const here = machineRecord();
+  const saved = identity.machine;
+  if (saved) {
+    const sameMachine = (saved.macs && saved.macs.length && here.macs.length)
+      ? saved.macs.some(m => here.macs.includes(m))
+      : saved.hostname === here.hostname;
+    if (!sameMachine) {
+      console.log(`[Messages] This identity was made on another computer (${saved.hostname}) -- taking a new one for ${here.hostname}.`);
+      identity.id = crypto.randomUUID();
+      identity.name = here.hostname || identity.name;
+    }
+  }
+  identity.machine = here;
+  saveIdentity();
+})();
+
 function saveIdentity() {
   fs.writeFileSync(IDENTITY_FILE, JSON.stringify(identity));
 }
@@ -236,10 +270,49 @@ function saveKnownPeers(kp) {
   fs.writeFileSync(KNOWN_PEERS_FILE, JSON.stringify(kp));
 }
 
+// Called on every broadcast and check-in, so it only touches the disk when
+// something changed or a minute has passed -- writing a file every few
+// seconds per peer would needlessly wear out a Raspberry Pi's SD card.
 function rememberPeer(id, info) {
   const known = loadKnownPeers();
-  known[id] = { ...(known[id] || {}), ...info, lastSeenAt: Date.now() };
+  const prev = known[id] || {};
+  const now = Date.now();
+  const changed = Object.entries(info).some(([k, v]) => v !== undefined && prev[k] !== v);
+  if (!changed && prev.lastSeenAt && now - prev.lastSeenAt < 60 * 1000) return;
+  known[id] = { ...prev, ...info, lastSeenAt: now };
+  // Only one copy of The Shelf can answer at an address, so an older
+  // identity at the same address is that computer before it changed --
+  // drop it (unless there's a conversation with it, which is kept).
+  if (info.ip) {
+    const port = info.httpPort || prev.httpPort || PORT;
+    for (const [otherId, p] of Object.entries(known)) {
+      if (otherId !== id && p.ip === info.ip && (p.httpPort || PORT) === port && !hasConversation(otherId)) delete known[otherId];
+    }
+  }
   saveKnownPeers(known);
+}
+
+function hasConversation(peerId) {
+  try { return fs.existsSync(path.join(CONVERSATIONS_DIR, `${peerId}.json`)); } catch { return false; }
+}
+
+// Clears out a known-peers list that filled up with throwaway identities
+// (see INSTANCE_TAG): keeps the newest entry per address, plus anyone
+// there's a conversation with.
+function tidyKnownPeers() {
+  const known = loadKnownPeers();
+  const entries = Object.entries(known).sort((a, b) => (b[1].lastSeenAt || 0) - (a[1].lastSeenAt || 0));
+  const seenAddr = new Set();
+  const kept = {};
+  for (const [id, p] of entries) {
+    const addr = p.ip ? `${p.ip}:${p.httpPort || PORT}` : `id:${id}`;
+    if (!seenAddr.has(addr) || hasConversation(id)) { kept[id] = p; seenAddr.add(addr); }
+  }
+  const removed = entries.length - Object.keys(kept).length;
+  if (removed > 0) {
+    saveKnownPeers(kept);
+    console.log(`[Messages] Tidied the list of known computers: removed ${removed} duplicate entr${removed === 1 ? 'y' : 'ies'}.`);
+  }
 }
 
 // ---- Play counts for Music/Videos/Games/Programs ----
@@ -395,17 +468,29 @@ function embedAlbumArt(filePath, artPath) {
 // Reads just the artist/performer tag, format-agnostic the same way
 // embedAlbumArt is — an untagged file, or one taglib can't parse, just
 // comes back with no artist rather than failing the whole listing.
-function readArtist(filePath) {
-  let file;
+//
+// Remembered per file (until the file changes): opening a song file and
+// parsing its tags is the slowest part of listing the Music shelf, and the
+// list is fetched often -- on a Raspberry Pi, re-reading a few hundred
+// songs' tags every time made the whole Shelf stall for a second or more
+// (nothing else gets answered while it's busy, music streaming included).
+const artistCache = new Map(); // path -> { mtimeMs, size, artist }
+function readArtist(filePath, stat) {
+  try { stat = stat || fs.statSync(filePath); } catch { return null; }
+  const hit = artistCache.get(filePath);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.artist;
+  let file, artist = null;
   try {
     file = TagLib.File.createFromPath(filePath);
-    const artist = file.tag.performers && file.tag.performers[0];
-    return artist ? artist.trim() : null;
+    const a = file.tag.performers && file.tag.performers[0];
+    artist = a ? a.trim() : null;
   } catch {
-    return null;
+    artist = null;
   } finally {
     if (file) file.dispose();
   }
+  artistCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, artist });
+  return artist;
 }
 
 function migrateAlbumArt(fromCategory, fromName, toCategory, toName) {
@@ -649,7 +734,9 @@ const udpSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 udpSocket.on('message', (msg, rinfo) => {
   let data;
   try { data = JSON.parse(msg.toString()); } catch { return; }
-  if (data.type !== 'shelf-presence' || !isValidId(data.id) || data.id === identity.id) return;
+  if (data.type !== 'shelf-presence' || !isValidId(data.id)) return;
+  if (isOwnEcho(data)) return; // our own broadcast, heard back
+  if (data.id === identity.id) { handleIdentityClash(rinfo.address, data.name); return; }
 
   onlinePeers.set(data.id, {
     id: data.id,
@@ -672,19 +759,234 @@ udpSocket.bind(DISCOVERY_PORT, () => {
   broadcastPresence();
 });
 
+// Every IPv4 network this computer is on (Wi-Fi, Ethernet, ...), with the
+// broadcast address and host range of each. A computer with more than one
+// connection used to announce itself on only one of them: 255.255.255.255
+// goes out of whichever connection the OS picks, so copies on the other
+// network never heard it.
+function localNetworks() {
+  const nets = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const iface of list || []) {
+      if (iface.family !== 'IPv4' || iface.internal || !iface.netmask) continue;
+      const ip = ipToInt(iface.address), mask = ipToInt(iface.netmask);
+      if (iface.address.startsWith('169.254.')) continue; // self-assigned "no network" address
+      nets.push({ address: iface.address, ip, mask, broadcast: intToIp((ip & mask) | (~mask >>> 0)) });
+    }
+  }
+  return nets;
+}
+function ipToInt(a) { return a.split('.').reduce((n, o) => ((n << 8) | Number(o)) >>> 0, 0); }
+function intToIp(n) { return [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.'); }
+
+// A random tag for this running copy of The Shelf. It rides along with
+// every announcement and "hello" reply, so a message that turns out to be
+// our own -- a broadcast echoed back to us, or a scan that reached this
+// computer through a second address -- is recognized as us, never as
+// "another computer using our identity". Without it, a Pi whose own
+// broadcast came back from an address it didn't list as its own (an
+// unplugged Ethernet port's self-assigned 169.254.x address, say) took a
+// new identity, announced it, heard itself again, and repeated that
+// hundreds of times a second -- flooding every other Shelf with thousands
+// of fake "raspberrypi" entries.
+const INSTANCE_TAG = crypto.randomBytes(8).toString('hex');
+function isOwnEcho(msg) { return !!msg && msg.instance === INSTANCE_TAG; }
+
+function presencePayload() {
+  return { type: 'shelf-presence', id: identity.id, name: identity.name, status: identity.status, httpPort: Number(PORT), instance: INSTANCE_TAG };
+}
+
 function broadcastPresence() {
   if (!appOn || identity.status === 'offline') return; // "appear offline", or the whole app is switched off
-  const payload = Buffer.from(JSON.stringify({
-    type: 'shelf-presence',
-    id: identity.id,
-    name: identity.name,
-    status: identity.status,
-    httpPort: PORT
-  }));
-  udpSocket.send(payload, 0, payload.length, DISCOVERY_PORT, '255.255.255.255', () => {});
+  const payload = Buffer.from(JSON.stringify(presencePayload()));
+  const targets = new Set(['255.255.255.255', ...localNetworks().map(n => n.broadcast)]);
+  for (const addr of targets) udpSocket.send(payload, 0, payload.length, DISCOVERY_PORT, addr, () => {});
 }
 
 setInterval(broadcastPresence, 3000);
+
+// ---- Messaging: direct discovery (works where broadcasts don't) ----
+// Broadcasts are the quick way to find each other, but plenty of networks
+// quietly drop them: Windows' firewall often blocks them, some routers and
+// mesh Wi-Fi don't pass them between devices, and VPN/virtual adapters can
+// swallow them. So as well as listening, each Shelf also asks directly:
+//
+//   - a network scan: every address on each local network (up to 254 per
+//     network) gets a quick "are you a Shelf?" on the usual port -- at
+//     startup, every couple of minutes, and on demand from the Messages
+//     tab's "Scan network" button;
+//   - a check-in every few seconds with each copy already known, so its
+//     online status stays right even if no broadcast ever arrives.
+//
+// The question carries our own details too, so whoever is asked learns
+// about us at the same moment -- discovery works both ways, even if only
+// one side can reach the other's broadcast.
+const SCAN_PORTS = [...new Set([Number(PORT), 8080])]; // PORT can arrive as text from the environment
+let lastScan = { at: 0, found: 0, scanning: false, addresses: 0 };
+
+// Another computer answering with OUR identity (see claimIdentityForThisComputer):
+// this computer takes a fresh one so the two can see each other again.
+// Hearing our own id from one of our own addresses is just us, though.
+let identityClash = null;
+// Every address this computer has -- including self-assigned 169.254.x
+// ones and IPv6, which localNetworks() leaves out on purpose.
+function ownAddresses() {
+  const all = new Set(['127.0.0.1', '::1']);
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const iface of list || []) if (iface && iface.address) all.add(iface.address.replace(/^::ffff:/, '').split('%')[0]);
+  }
+  return all;
+}
+let lastClashAt = 0;
+function handleIdentityClash(fromIp, otherName) {
+  const ip = String(fromIp || '').replace(/^::ffff:/, '');
+  if (!ip || ownAddresses().has(ip)) return false;
+  // A real clash needs fixing once. If it seems to keep happening, something
+  // else is going on -- never churn through identities.
+  if (Date.now() - lastClashAt < 10 * 60 * 1000) return false;
+  lastClashAt = Date.now();
+  const oldName = identity.name;
+  identity.id = crypto.randomUUID();
+  if (otherName && otherName === identity.name && os.hostname() && os.hostname() !== identity.name) identity.name = os.hostname();
+  saveIdentity();
+  identityClash = { at: Date.now(), withIp: ip, oldName, newName: identity.name };
+  console.log(`[Messages] ${ip} was using this computer's identity (likely set up from its backup) -- took a new one.`);
+  broadcastPresence();
+  return true;
+}
+
+// Two DIFFERENT computers seen with the same identity (neither has updated
+// yet, so neither has fixed it): remembered so Messages can say so plainly
+// instead of quietly showing just one of them.
+const idAddresses = new Map(); // id -> Map(ip -> { at, name })
+function noteIdAddress(id, ip, name) {
+  const now = Date.now();
+  // A computer that now answers with a different identity (it fixed a
+  // clash) no longer counts toward its old one.
+  for (const [otherId, other] of idAddresses) if (otherId !== id) other.delete(ip);
+  const m = idAddresses.get(id) || new Map();
+  m.set(ip, { at: now, name });
+  for (const [k, v] of m) if (now - v.at > 5 * 60 * 1000) m.delete(k);
+  idAddresses.set(id, m);
+}
+function sharedIdentities() {
+  const out = [];
+  for (const [id, m] of idAddresses) {
+    if (m.size > 1) out.push({ id, computers: [...m.entries()].map(([ip, v]) => ({ ip, name: v.name || 'Unknown' })) });
+  }
+  return out;
+}
+
+function notePeer(info, ip, via) {
+  if (!info || !isValidId(info.id)) return null;
+  if (isOwnEcho(info)) return null; // reached ourselves through another address
+  if (info.id === identity.id) { handleIdentityClash(ip, info.name); return null; }
+  noteIdAddress(info.id, ip, String(info.name || 'Unknown').slice(0, 60));
+  const peer = {
+    id: info.id,
+    name: String(info.name || 'Unknown').slice(0, 60),
+    status: ['online', 'away', 'busy'].includes(info.status) ? info.status : 'online',
+    ip,
+    httpPort: Number(info.httpPort) || PORT,
+    lastSeen: Date.now(),
+    via,
+  };
+  onlinePeers.set(peer.id, peer);
+  rememberPeer(peer.id, { name: peer.name, ip: peer.ip, httpPort: peer.httpPort });
+  return peer;
+}
+
+// Asks one address whether it's a Shelf. Newer copies answer the "hello"
+// (and learn about us); older ones without it still answer the plain
+// identity request, so they're found too.
+async function probeShelf(ip, port, timeoutMs) {
+  const base = `http://${ip}:${port}/api/messaging`;
+  try {
+    const r = await fetch(`${base}/hello`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(presencePayload()), signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      return data && data.type === 'shelf-hello' ? { ...data, httpPort: data.httpPort || port } : null;
+    }
+    if (r.status !== 404) return null;
+    const old = await fetch(`${base}/identity`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!old.ok) return null;
+    const data = await old.json();
+    return data && data.id && data.status !== 'offline' ? { ...data, httpPort: port } : null;
+  } catch { return null; }
+}
+
+async function scanNetwork() {
+  if (lastScan.scanning || !appOn || identity.status === 'offline') return lastScan;
+  lastScan = { ...lastScan, scanning: true };
+  const targets = [];
+  const ranges = new Map(); // "a.b.c" -> { base, size, skip }
+  for (const net of localNetworks()) {
+    // Big networks are narrowed to the 254 addresses around our own, so a
+    // scan always finishes in seconds rather than probing thousands.
+    const mask = (net.mask >>> 0) < 0xFFFFFF00 ? 0xFFFFFF00 : net.mask;
+    const base = (net.ip & mask) >>> 0;
+    ranges.set(intToIp(base), { base, size: (~mask >>> 0) + 1, skip: net.address });
+  }
+  // On a big network (say 10.0.0.0/16) other copies can sit outside our
+  // own 254 -- so also cover each nearby range where one has been seen.
+  const bigNets = localNetworks().filter(n => (n.mask >>> 0) < 0xFFFFFF00);
+  for (const p of Object.values(loadKnownPeers())) {
+    if (!p.ip || !/^\d+\.\d+\.\d+\.\d+$/.test(p.ip)) continue;
+    const ipInt = ipToInt(p.ip);
+    if (!bigNets.some(n => ((ipInt & n.mask) >>> 0) === ((n.ip & n.mask) >>> 0))) continue;
+    const base = (ipInt & 0xFFFFFF00) >>> 0;
+    if (!ranges.has(intToIp(base)) && ranges.size < 8) ranges.set(intToIp(base), { base, size: 256, skip: null });
+  }
+  for (const r of ranges.values()) {
+    for (let i = 1; i < r.size - 1; i++) {
+      const ip = intToIp((r.base + i) >>> 0);
+      if (ip !== r.skip) for (const port of SCAN_PORTS) targets.push([ip, port]);
+    }
+  }
+  lastScan.ranges = [...ranges.values()].map(r => `${intToIp((r.base + 1) >>> 0)}\u2013${intToIp((r.base + r.size - 2) >>> 0)}`);
+  let found = 0, next = 0;
+  const worker = async () => {
+    while (next < targets.length) {
+      const [ip, port] = targets[next++];
+      const info = await probeShelf(ip, port, 800);
+      if (info && notePeer(info, ip, 'scan')) found++;
+    }
+  };
+  await Promise.all(Array.from({ length: 48 }, worker));
+  lastScan = { at: Date.now(), found, scanning: false, addresses: targets.length, ranges: lastScan.ranges };
+  return lastScan;
+}
+setTimeout(() => scanNetwork().catch(() => {}), 4000);
+setInterval(() => scanNetwork().catch(() => {}), 2 * 60 * 1000);
+
+// Check in directly with every copy seen in the last week.
+async function checkInWithKnownPeers() {
+  if (!appOn || identity.status === 'offline') return;
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  // Once per address (newest entry wins), and at most 40 at a time -- a
+  // list full of duplicates used to mean thousands of requests every 5
+  // seconds, which buried a Raspberry Pi.
+  const byAddr = new Map();
+  for (const [id, p] of Object.entries(loadKnownPeers())) {
+    if (id === identity.id || !p.ip || !(p.lastSeenAt > weekAgo)) continue;
+    const addr = `${p.ip}:${p.httpPort || PORT}`;
+    const cur = byAddr.get(addr);
+    if (!cur || (p.lastSeenAt || 0) > (cur[1].lastSeenAt || 0)) byAddr.set(addr, [id, p]);
+  }
+  const known = [...byAddr.values()].sort((a, b) => (b[1].lastSeenAt || 0) - (a[1].lastSeenAt || 0)).slice(0, 40);
+  await Promise.all(known.map(async ([id, p]) => {
+    const info = await probeShelf(p.ip, p.httpPort || PORT, 1500);
+    // Noted even if the identity changed -- e.g. that computer just took a
+    // new one after a clash -- so it reappears within seconds, not minutes.
+    if (info) notePeer(info, p.ip, 'direct');
+  }));
+}
+setInterval(() => checkInWithKnownPeers().catch(() => {}), 5000);
+tidyKnownPeers();
+setInterval(() => { try { tidyKnownPeers(); } catch { /* best effort */ } }, 10 * 60 * 1000);
 
 function prunedOnlinePeers() {
   const now = Date.now();
@@ -706,6 +1008,31 @@ function loadConversation(peerId) {
   const file = conversationFile(peerId);
   if (!fs.existsSync(file)) return [];
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return []; }
+}
+
+// The conversation list is asked for every few seconds by every open
+// browser (for the unread badge), and conversations keep shared pictures
+// inside them -- so re-reading and re-parsing every one of them each time
+// got slower the more you chatted. Each conversation's summary is now
+// remembered until its file changes.
+const conversationSummaryCache = new Map(); // peerId -> { mtimeMs, size, summary }
+function conversationSummary(peerId) {
+  const file = conversationFile(peerId);
+  let st;
+  try { st = fs.statSync(file); } catch { return null; }
+  const hit = conversationSummaryCache.get(peerId);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.summary;
+  const messages = loadConversation(peerId);
+  const last = messages[messages.length - 1];
+  let lastIn = null, unread = 0;
+  for (const m of messages) if (m.direction === 'in') { lastIn = m; if (!m.read) unread++; }
+  const summary = {
+    last: last ? { timestamp: last.timestamp, text: last.text || '', image: !!last.image } : null,
+    lastIn: lastIn ? { timestamp: lastIn.timestamp, text: lastIn.text || '', image: !!lastIn.image } : null,
+    unread,
+  };
+  conversationSummaryCache.set(peerId, { mtimeMs: st.mtimeMs, size: st.size, summary });
+  return summary;
 }
 
 function saveConversation(peerId, messages) {
@@ -1191,6 +1518,13 @@ app.get('/api/files', (req, res) => {
     return res.status(400).json({ error: 'Invalid category' });
   }
   const dir = path.join(SHARED_ROOT, cat);
+  // Each lookup file is read once for the whole list, not once per item --
+  // that was a few hundred reads of the same files per listing.
+  const counts = loadPlayCounts();
+  const artMap = cat === 'Music' ? loadAlbumArtMap() : null;
+  const videoThumbs = cat === 'Videos' ? loadVideoThumbMap() : null;
+  const fileThumbs = THUMBNAILABLE_CATEGORIES.includes(cat) ? loadFileThumbMap() : null;
+  const key = (f) => `${cat}/${f}`;
   const files = fs.readdirSync(dir)
     .filter(f => !f.startsWith('.'))
     .map(f => {
@@ -1200,20 +1534,31 @@ app.get('/api/files', (req, res) => {
         size: stat.size,
         sizeLabel: humanSize(stat.size),
         modified: stat.mtimeMs,
+        added: addedAt(stat),
         kind: fileKind(f),
         ext: extOf(f),
         url: `/shared/${cat}/${encodeURIComponent(f)}`,
-        plays: getPlayCount(cat, f),
-        artUrl: cat === 'Music' ? getAlbumArtUrl(cat, f) : undefined,
-        artist: cat === 'Music' ? readArtist(path.join(dir, f)) : undefined,
-        thumbUrl: cat === 'Videos' ? getVideoThumbUrl(cat, f)
-          : THUMBNAILABLE_CATEGORIES.includes(cat) ? getFileThumbUrl(cat, f)
+        plays: counts[key(f)] || 0,
+        artUrl: artMap ? (artMap[key(f)] ? `/data-files/album-art/${artMap[key(f)]}` : null) : undefined,
+        artist: cat === 'Music' ? readArtist(path.join(dir, f), stat) : undefined,
+        thumbUrl: videoThumbs ? (videoThumbs[key(f)] ? `/data-files/video-thumbs/${videoThumbs[key(f)]}` : null)
+          : fileThumbs ? (fileThumbs[key(f)] ? `/data-files/file-thumbs/${fileThumbs[key(f)]}` : null)
           : undefined
       };
     })
     .sort((a, b) => b.modified - a.modified);
   res.json(files);
 });
+
+// When a file arrived on the shelf. The file's creation time on this disk
+// is the honest answer -- a song copied in today keeps its original
+// "modified" date from years ago, and editing its tags later bumps
+// "modified" without it being new. Some disks (FAT/exFAT USB drives, a few
+// network shares) don't record creation time, so those fall back to
+// "modified".
+function addedAt(stat) {
+  return stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs;
+}
 
 // Exports a shelf's file listing as a .xlsx spreadsheet -- handy for
 // keeping an offline catalog, or sharing "what's on here" with someone
@@ -1229,23 +1574,29 @@ app.get('/api/files/:category/export', (req, res) => {
   }
   const dir = path.join(SHARED_ROOT, category);
   const countLabel = category === 'Programs' ? 'Downloads' : (category === 'Books' ? 'Times Read' : 'Plays');
+  const counts = loadPlayCounts();
+  const artMap = loadAlbumArtMap();
   const rows = fs.readdirSync(dir)
     .filter(f => !f.startsWith('.'))
     .map(f => {
       const stat = fs.statSync(path.join(dir, f));
-      const row = {
-        'Name': f,
-        [countLabel]: getPlayCount(category, f),
-        'Size (MB)': Math.round((stat.size / (1024 * 1024)) * 100) / 100,
-        'Date Modified': new Date(stat.mtimeMs).toLocaleString()
-      };
-      if (category === 'Music') row['Has Album Art'] = getAlbumArtUrl(category, f) ? 'Yes' : 'No';
+      if (!stat.isFile()) return null;
+      const row = { 'Name': f };
+      if (category === 'Music') row['Artist'] = readArtist(path.join(dir, f), stat) || '';
+      row['Type'] = (extOf(f) || '').toUpperCase();
+      if (category !== 'Pictures') row[countLabel] = counts[`${category}/${f}`] || 0;
+      row['Size (MB)'] = Math.round((stat.size / (1024 * 1024)) * 100) / 100;
+      row['Date Added'] = new Date(addedAt(stat)).toLocaleString();
+      row['Date Modified'] = new Date(stat.mtimeMs).toLocaleString();
+      if (category === 'Music') row['Has Album Art'] = artMap[`${category}/${f}`] ? 'Yes' : 'No';
       return row;
     })
+    .filter(Boolean)
     .sort((a, b) => a.Name.localeCompare(b.Name));
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
-  worksheet['!cols'] = [{ wch: 42 }, { wch: 10 }, { wch: 11 }, { wch: 20 }, { wch: 13 }];
+  const widths = { 'Name': 42, 'Artist': 24, 'Type': 7, [countLabel]: 11, 'Size (MB)': 11, 'Date Added': 20, 'Date Modified': 20, 'Has Album Art': 13 };
+  worksheet['!cols'] = Object.keys(rows[0] || {}).map(k => ({ wch: widths[k] || 14 }));
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, category.slice(0, 31)); // sheet names cap at 31 chars
   const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
@@ -1640,7 +1991,51 @@ function smartTitlecase(text) {
 // known junk tokens, protect whitelisted artist names before splitting on
 // hyphens, strip descriptor words at the word level, then smart-titlecase
 // what's left.
+// Bracketed bits that only describe the upload, never the song:
+// "(Official Video)", "[HD]", "(Lyrics)", "(Official Music Video 4K)".
+// Bracketed bits that ARE part of the song's name -- "(Live)", "(feat. X)",
+// "(Taylor's Version)", "(Clean Version)", "(Day-O)" -- don't match,
+// because every word inside has to be one of these.
+const UPLOAD_ONLY_WORDS = new Set(['official', 'music', 'video', 'audio', 'lyric', 'lyrics', 'hd', 'hq',
+  '4k', '1080p', '720p', 'visualizer', 'mv', 'remastered', 'remaster', 'explicit', 'vevo', 'topic', 'with']);
+function stripUploadBrackets(text) {
+  return text.replace(/\s*[\(\[]([^\)\]]*)[\)\]]/g, (whole, inner) => {
+    const words = inner.toLowerCase().split(/[\s\/,&+-]+/).filter(Boolean);
+    return words.length && words.every(w => UPLOAD_ONLY_WORDS.has(w) || /^\d{4}$/.test(w)) ? '' : whole;
+  }).replace(/\s{2,}/g, ' ').trim();
+}
+
+// A name that's already "Artist - Title" (spaces around the dash) with no
+// downloader debris in it is left exactly as written. The word-by-word
+// cleanup below is for messy download names; run on a tidy one it used
+// to do damage -- "Deee-Lite" became "Deee - Lite", "Un-Break My Heart"
+// lost its hyphen, "(feat. JAY-Z)" turned JAY-Z into the artist,
+// "Pt. 2" lost the 2. Returns null when the name isn't tidy.
+function parseTidyName(stem) {
+  const text = stem.includes(' ') ? stem : stem.replace(/_/g, ' ');
+  const tokens = text.split(/\s+/).filter(Boolean);
+  const debris = tokens.some(t => {
+    const low = t.toLowerCase().replace(/[()\[\]]/g, '');
+    return JUNK_SITE_TOKENS.has(low) || BITRATE_RE.test(low) || looksLikeVideoId(t) || /_/.test(t) || /^0\d{1,2}$/.test(t);
+  });
+  if (debris) return null;
+  const cleaned = stripUploadBrackets(text);
+  const at = cleaned.indexOf(' - ');
+  if (at <= 0) return null;
+  // All-lowercase ("the weeknd - blinding lights") gets capitalized;
+  // anything with capitals in it is left as the person wrote it.
+  const fixCase = (x) => isLowerWord(x.replace(/[^A-Za-z]/g, '')) ? smartTitlecase(x) : x;
+  const artist = fixCase(cleaned.slice(0, at).trim());
+  const title = fixCase(cleaned.slice(at + 3).trim());
+  if (!artist || !title) return null;
+  const result = `${artist} - ${title}`;
+  return { artist, title, track: '', confidence: 'high (tidy name)', tidy: true, changed: result !== stem, tidyName: result };
+}
+
 function cleanStem(stem, whitelist) {
+  const tidy = parseTidyName(stem);
+  if (tidy) return tidy;
+  stem = stripUploadBrackets(stem.replace(/_/g, ' ')).replace(/ /g, '_');
   const tokens = stem.split(/[\s_]+/).map(t => t.trim()).filter(Boolean);
   let trackGuess = '';
   let meaningfulTokens = [];
@@ -1658,6 +2053,10 @@ function cleanStem(stem, whitelist) {
     if (BITRATE_RE.test(t)) return;
     if (looksLikeVideoId(t)) return;
     if (looksLikeJunkIdFragment(t)) return;
+    // "009", "012": a downloader's counter (the leading zero gives it away),
+    // wherever it lands -- it's often followed by a bitrate, so it isn't
+    // necessarily the very last word.
+    if (/^0\d{1,2}$/.test(t)) return;
     if (TRACK_NUM_RE.test(t) && !trackGuess && (idx === 0 || idx === tokens.length - 1)) {
       trackGuess = String(parseInt(t, 10));
       return;
@@ -1814,6 +2213,20 @@ function buildMusicProposal(filePath, filename, whitelist) {
 
   const tags = readMusicTags(filePath);
   const guess = cleanStem(stem, whitelist);
+
+  // Already tidy: keep the name (apart from dropping "(Official Video)"-type
+  // bits) and only fill in tags that are missing -- never overwrite good
+  // tags from the filename, or rename a tidy file to match its tags.
+  if (guess.tidy) {
+    const proposedFilename = guess.changed ? sanitizeFilename(`${guess.tidyName}${ext.toLowerCase()}`) : filename;
+    return {
+      artist: tags.artist.trim() ? '' : guess.artist,
+      title: tags.title.trim() ? '' : guess.title,
+      track: '',
+      confidence: guess.confidence,
+      proposedFilename,
+    };
+  }
 
   const finalArtist = tags.artist.trim() || guess.artist;
   const finalTitle = tags.title.trim() || guess.title;
@@ -2062,7 +2475,7 @@ app.post('/api/files/:category/standardize-names', async (req, res) => {
       }
     }
 
-    send({ type: 'done', renamedCount: renamed.length, renamed, skipped, correctedCount: corrected });
+    send({ type: 'done', renamedCount: renamed.length, renamed, skipped, correctedCount: corrected, checkedCount: musicFiles.length });
     return res.end();
   }
 
@@ -2098,7 +2511,7 @@ app.post('/api/files/:category/standardize-names', async (req, res) => {
     }
   }
 
-  send({ type: 'done', renamedCount: renamed.length, renamed, skipped });
+  send({ type: 'done', renamedCount: renamed.length, renamed, skipped, checkedCount: files.length });
   res.end();
 });
 
@@ -3031,6 +3444,95 @@ app.get('/api/messaging/peers', (req, res) => {
   res.json(prunedOnlinePeers());
 });
 
+// The direct "are you a Shelf?" question from another copy (see
+// probeShelf). Answers with our details, and notes theirs -- unless
+// messaging is switched off here, in which case we stay invisible.
+app.post('/api/messaging/hello', (req, res) => {
+  if (!appOn || identity.status === 'offline') return res.status(404).json({ error: 'Not found' });
+  const ip = (req.ip || req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  const body = req.body || {};
+  if (body.type === 'shelf-presence' && ip && ip !== '127.0.0.1' && ip !== '::1') notePeer(body, ip, 'hello'); // (handles a clash too)
+  res.json({ type: 'shelf-hello', id: identity.id, name: identity.name, status: identity.status, httpPort: PORT, instance: INSTANCE_TAG });
+});
+
+// "Add by address": check one computer directly and say exactly what's
+// wrong if it isn't showing up -- not running, wrong port, Local computer
+// only switched on, messaging off, not a Shelf at all, or sharing an
+// identity with another computer.
+app.post('/api/messaging/add', async (req, res) => {
+  const raw = String((req.body || {}).address || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const m = /^(\[?[^\]]+?\]?|[^:]+)(?::(\d{1,5}))?$/.exec(raw);
+  if (!raw || !m) return res.status(400).json({ error: 'Type an address like 10.0.0.50, 10.0.0.50:8080, or raspberrypi.local.' });
+  const host = m[1], port = Number(m[2]) || 8080;
+  if (port < 1 || port > 65535) return res.status(400).json({ error: "That port number isn't valid." });
+
+  let ip = host;
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    try { ip = (await dns.promises.lookup(host, { family: 4 })).address; }
+    catch { return res.json({ ok: false, message: `Couldn't find a computer called "${host}" on the network. Try its IP address instead.` }); }
+  }
+  if (ownAddresses().has(ip) && port === Number(PORT)) return res.json({ ok: false, message: "That's this computer." });
+
+  const base = `http://${ip}:${port}/api/messaging`;
+  const where = `${ip}:${port}`;
+  let r;
+  try {
+    r = await fetch(`${base}/hello`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(presencePayload()), signal: AbortSignal.timeout(4000) });
+  } catch (err) {
+    const code = err && err.cause && err.cause.code;
+    return res.json({ ok: false, message: code === 'ECONNREFUSED'
+      ? `${ip} is there, but nothing is answering on port ${port}. Is The Shelf running on it, and on that port? (The address bar on that computer shows its port.)`
+      : `Nothing answered at ${port === 8080 ? ip : where}. Check the address, and that the computer is switched on and on the same network. A firewall on that computer can also block it.` });
+  }
+  let body = null;
+  try { body = await r.json(); } catch { /* not JSON */ }
+  if (r.status === 503 && body && /local-only/i.test(body.error || '')) {
+    return res.json({ ok: false, message: `The Shelf at ${where} has "Local computer only" switched on, so it turns every other computer away. Switch it off on that computer.` });
+  }
+  if (r.status === 503 && body && /turned off/i.test(body.error || '')) {
+    return res.json({ ok: false, message: `The Shelf at ${where} is switched off ("The Shelf is on" toggle). Switch it on there.` });
+  }
+  let info = r.ok && body && body.type === 'shelf-hello' ? { ...body, httpPort: body.httpPort || port } : null;
+  if (!info && r.status === 404) {
+    // An older version without "hello", or messaging switched off there.
+    try {
+      const old = await fetch(`${base}/identity`, { signal: AbortSignal.timeout(4000) });
+      const data = old.ok ? await old.json() : null;
+      if (data && data.id) {
+        if (data.status === 'offline') return res.json({ ok: false, message: `The Shelf at ${where} has messaging switched off. Turn on "Messaging on" in its Messages tab.` });
+        info = { ...data, httpPort: port, older: true };
+      } else if (old.status === 401) {
+        return res.json({ ok: false, message: `The Shelf at ${where} has "Secured visitors" on and is an older version that can't be found that way. Update it to this version, and it will be.` });
+      }
+    } catch { /* fall through */ }
+    if (!info) return res.json({ ok: false, message: `The Shelf at ${where} has messaging switched off, or isn't a Shelf. If it's a Shelf, turn on "Messaging on" in its Messages tab.` });
+  }
+  if (!info) return res.json({ ok: false, message: `Something answered at ${where}, but it isn't The Shelf.` });
+  if (isOwnEcho(info)) return res.json({ ok: false, message: "That's this computer (another of its addresses)." });
+
+  if (info.id === identity.id) {
+    handleIdentityClash(ip, info.name);
+    return res.json({ ok: false, retry: true, message: `${info.name || 'That computer'} at ${ip} was using the same identity as this one (usually from setting it up with this computer's backup). This computer has taken a new identity — click Add again.` });
+  }
+  const sameIdElsewhere = Object.entries(loadKnownPeers()).find(([id, p]) => id === info.id && p.ip && p.ip !== ip && onlinePeers.has(id));
+  const peer = notePeer(info, ip, 'manual');
+  res.json({ ok: true, peer, older: !!info.older,
+    warning: sameIdElsewhere ? `Heads up: ${sameIdElsewhere[1].name} at ${sameIdElsewhere[1].ip} is using the same identity as this computer — usually because one was set up from the other's backup. Update both to this version and they'll sort it out themselves.` : null });
+});
+
+app.post('/api/messaging/scan', async (req, res) => {
+  const result = await scanNetwork();
+  res.json({ ...result, online: prunedOnlinePeers().length });
+});
+
+// For the "You" line at the top of Messages: this computer's own address(es).
+app.get('/api/messaging/self', (req, res) => {
+  const { machine, ...pub } = identity;
+  res.json({ ...pub, addresses: localNetworks().map(n => n.address), port: PORT, lastScan,
+    identityClash, sharedIdentities: sharedIdentities() });
+});
+
 // Every Shelf instance ever seen on this network (via discovery broadcast
 // or messaging), regardless of whether a conversation was ever started —
 // this is the "previously connected computers" list shown in the sidebar.
@@ -3043,6 +3545,7 @@ app.get('/api/messaging/known-peers', (req, res) => {
       id,
       name: info.name || 'Unknown',
       ip: info.ip || null,
+      httpPort: info.httpPort || null,
       online: online.has(id),
       lastSeenAt: info.lastSeenAt || 0
     }))
@@ -3058,15 +3561,16 @@ app.get('/api/messaging/conversations', (req, res) => {
     .map(f => f.replace(/\.json$/, ''));
 
   const list = peerIds.map(id => {
-    const messages = loadConversation(id);
-    const last = messages[messages.length - 1];
-    const unread = messages.filter(m => m.direction === 'in' && !m.read).length;
+    const { last, lastIn, unread } = conversationSummary(id) || { last: null, lastIn: null, unread: 0 };
     const lastPreview = last ? (last.text || (last.image ? '\ud83d\uddbc\ufe0f Image' : '')) : '';
     return {
+      lastInAt: lastIn ? lastIn.timestamp : 0,
+      lastInPreview: lastIn ? (lastIn.text || (lastIn.image ? 'Sent an image' : '')) : '',
       id,
       name: (known[id] && known[id].name) || 'Unknown',
       online: online.has(id),
       ip: (known[id] && known[id].ip) || null,
+      httpPort: (known[id] && known[id].httpPort) || null,
       lastMessage: lastPreview,
       lastAt: last ? last.timestamp : (known[id] && known[id].lastSeenAt) || 0,
       unread
@@ -3097,7 +3601,13 @@ app.post('/api/messaging/send', async (req, res) => {
   if (image && (typeof image !== 'string' || !image.startsWith('data:image/') || image.length > MAX_MESSAGE_IMAGE_CHARS)) {
     return res.status(400).json({ error: 'That image is too large to send.' });
   }
-  const peer = onlinePeers.get(toId);
+  // Not heard from recently? Try their last known address anyway -- they
+  // may be up but unreachable by broadcast.
+  let peer = onlinePeers.get(toId);
+  if (!peer) {
+    const k = loadKnownPeers()[toId];
+    if (k && k.ip) peer = { id: toId, name: k.name, ip: k.ip, httpPort: k.httpPort || PORT };
+  }
   if (!peer) {
     return res.status(404).json({ error: 'That person appears to be offline right now.' });
   }
@@ -3113,7 +3623,8 @@ app.post('/api/messaging/send', async (req, res) => {
     const resp = await fetch(`http://${peer.ip}:${peer.httpPort}/api/messaging/receive`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fromId: identity.id, fromName: identity.name, text: message.text, image: message.image, timestamp: message.timestamp })
+      body: JSON.stringify({ fromId: identity.id, fromName: identity.name, fromPort: PORT, text: message.text, image: message.image, timestamp: message.timestamp }),
+      signal: AbortSignal.timeout(8000)
     });
     if (!resp.ok) throw new Error('Delivery failed');
   } catch (err) {
@@ -3126,7 +3637,7 @@ app.post('/api/messaging/send', async (req, res) => {
 });
 
 app.post('/api/messaging/receive', (req, res) => {
-  const { fromId, fromName, text, image, timestamp } = req.body || {};
+  const { fromId, fromName, fromPort, text, image, timestamp } = req.body || {};
   if (!isValidId(fromId) || (!text && !image)) {
     return res.status(400).json({ error: 'Invalid message' });
   }
@@ -3144,7 +3655,10 @@ app.post('/api/messaging/receive', (req, res) => {
   appendMessage(fromId, message);
 
   const known = loadKnownPeers();
-  rememberPeer(fromId, { name: fromName || (known[fromId] && known[fromId].name) || 'Unknown' });
+  const senderIp = (req.ip || req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  const senderName = fromName || (known[fromId] && known[fromId].name) || 'Unknown';
+  if (senderIp && fromPort) notePeer({ id: fromId, name: senderName, httpPort: fromPort }, senderIp, 'message');
+  else rememberPeer(fromId, { name: senderName });
 
   res.json({ ok: true });
 });
@@ -3503,10 +4017,18 @@ function recommendedAiModelId(machine) {
 // Any .gguf someone dropped into data/ai/model by hand also shows up as a
 // choice ("your own model file"), so advanced users aren't limited to the list.
 function listCustomAiModelFiles() {
-  const known = new Set(AI_MODELS.map(m => m.file));
+  // Files belonging to a list model -- finished, or a half-finished
+  // download of one -- aren't "your own".
+  const known = new Set(AI_MODELS.map(m => aiCatalogFile(m)).filter(Boolean));
+  const listNames = new Map(AI_MODELS.map(m => [normalizeGgufName(m.file), m.size]));
+  const partial = (f) => {
+    const full = listNames.get(normalizeGgufName(f));
+    if (!full) return false;
+    try { return fs.statSync(path.join(AI_MODEL_DIR, f)).size < full * 0.99; } catch { return true; }
+  };
   try {
     return fs.readdirSync(AI_MODEL_DIR)
-      .filter(f => f.toLowerCase().endsWith('.gguf') && !known.has(f))
+      .filter(f => f.toLowerCase().endsWith('.gguf') && !known.has(f) && !partial(f))
       .map(f => ({ id: `file:${f}`, label: f, file: f, custom: true,
         size: fs.statSync(path.join(AI_MODEL_DIR, f)).size, ramGB: null,
         blurb: 'A model file you added yourself.' }));
@@ -3517,18 +4039,54 @@ function findAiModel(id) {
   return AI_MODELS.find(m => m.id === id) || listCustomAiModelFiles().find(m => m.id === id) || null;
 }
 
+// Where a list model actually is on disk. The downloader doesn't save under
+// the name in AI_MODELS -- it adds its own prefix ("hf_bartowski_...") and
+// sometimes a "." before the quant -- so looking only for model.file made
+// every finished download look "incomplete". Checked in order:
+//   1. the file the downloader itself reported when this model finished
+//      (remembered in downloads.json, with its size);
+//   2. the plain catalog name, complete (exact size);
+//   3. any .gguf here whose name is the catalog name with the downloader's
+//      decorations, or whose size is exactly the model's (a finished copy
+//      from before this was fixed).
+// A half-finished download is smaller, so it never matches.
+const AI_DOWNLOADS_FILE = path.join(AI_DIR, 'downloads.json');
+function loadAiDownloads() {
+  try { return JSON.parse(fs.readFileSync(AI_DOWNLOADS_FILE, 'utf8')) || {}; } catch { return {}; }
+}
+function normalizeGgufName(f) {
+  return f.toLowerCase().replace(/^hf_[^_]+_/, '').replace(/\.(q\d[a-z0-9_]*)\.gguf$/, '-$1.gguf');
+}
+function aiCatalogFile(model) {
+  const sizeOf = (f) => { try { return fs.statSync(path.join(AI_MODEL_DIR, f)).size; } catch { return -1; } };
+  const rec = loadAiDownloads()[model.id];
+  if (rec && rec.file && sizeOf(rec.file) === rec.size) return rec.file;
+  if (sizeOf(model.file) === model.size) return model.file;
+  let files = [];
+  try { files = fs.readdirSync(AI_MODEL_DIR).filter(f => f.toLowerCase().endsWith('.gguf')); } catch { return null; }
+  const want = normalizeGgufName(model.file);
+  return files.find(f => sizeOf(f) === model.size)
+    || files.find(f => normalizeGgufName(f) === want && Math.abs(sizeOf(f) - model.size) < model.size * 0.01)
+    || null;
+}
+function aiModelFile(model) {
+  if (!model) return null;
+  if (!model.custom) return aiCatalogFile(model);
+  try { return fs.statSync(path.join(AI_MODEL_DIR, model.file)).size > 0 ? model.file : null; } catch { return null; }
+}
 function isAiModelDownloaded(model) {
-  if (!model) return false;
-  try {
-    const st = fs.statSync(path.join(AI_MODEL_DIR, model.file));
-    return model.custom ? st.size > 0 : st.size === model.size; // a half-finished download is smaller
-  } catch { return false; }
+  return !!aiModelFile(model);
 }
 
 function loadAiSettings() {
   let settings = { enabled: false };
   if (fs.existsSync(AI_SETTINGS_FILE)) {
     try { settings = JSON.parse(fs.readFileSync(AI_SETTINGS_FILE, 'utf8')); } catch { /* corrupt -- defaults */ }
+  }
+  if (settings.modelId && settings.modelId.startsWith('file:')) {
+    const f = settings.modelId.slice(5);
+    const owner = AI_MODELS.find(m => aiCatalogFile(m) === f);
+    if (owner) settings.modelId = owner.id; // that file turned out to be one of the list's models
   }
   if (!settings.modelId || !findAiModel(settings.modelId)) settings.modelId = AI_DEFAULT_MODEL_ID;
   return settings;
@@ -3558,7 +4116,8 @@ let aiLoadedModelId = null; // which model is actually in memory right now
 // The chosen model's file, if it's fully downloaded.
 function findDownloadedModelFile() {
   const model = activeAiModel();
-  return isAiModelDownloaded(model) ? path.join(AI_MODEL_DIR, model.file) : null;
+  const file = aiModelFile(model);
+  return file ? path.join(AI_MODEL_DIR, file) : null;
 }
 
 // node-llama-cpp ships a different prebuilt binary per OS/CPU/GPU
@@ -3714,7 +4273,16 @@ async function ensureAiLoaded() {
 (function initAiOnStartup() {
   const settings = loadAiSettings();
   if (settings.enabled && findDownloadedModelFile()) {
-    ensureAiLoaded().catch(err => console.error('[AI] Failed to load model on startup:', err.message));
+    // A model bigger than this machine's memory (say the 7B picked on a
+    // 4 GB Pi) would push the whole computer into swapping the moment The
+    // Shelf starts, making everything crawl -- so that one waits until
+    // someone opens the AI tab and asks for it.
+    const model = activeAiModel();
+    if (!model.custom && aiModelFit(model, describeAiMachine()) === 'too-big') {
+      console.log(`[AI] Not loading ${model.label} at startup -- it needs more memory than this computer has.`);
+    } else {
+      ensureAiLoaded().catch(err => console.error('[AI] Failed to load model on startup:', err.message));
+    }
   }
 })();
 
@@ -3770,7 +4338,8 @@ app.delete('/api/ai/models/:id', async (req, res) => {
   if (!model) return res.status(404).json({ error: 'Unknown model.' });
   if (aiDownloadingModelId === model.id) return res.status(409).json({ error: 'That model is still downloading.' });
   if (aiLoadedModelId === model.id) await unloadAi();
-  try { fs.unlinkSync(path.join(AI_MODEL_DIR, model.file)); } catch { /* already gone */ }
+  const file = aiModelFile(model);
+  if (file) { try { fs.unlinkSync(path.join(AI_MODEL_DIR, file)); } catch { /* already gone */ } }
   res.json({ deleted: model.id });
 });
 
@@ -3837,6 +4406,15 @@ app.post('/api/ai/download', async (req, res) => {
       },
     });
     await downloader.download();
+    // Remember exactly which file the downloader wrote (its own naming).
+    const savedPath = downloader.entrypointFilePath;
+    let savedSize = -1;
+    try { savedSize = fs.statSync(savedPath).size; } catch { /* checked below */ }
+    if (savedSize > 0 && (!downloader.totalSize || savedSize >= downloader.totalSize)) {
+      const recs = loadAiDownloads();
+      recs[model.id] = { file: path.basename(savedPath), size: savedSize };
+      fs.writeFileSync(AI_DOWNLOADS_FILE, JSON.stringify(recs));
+    }
     if (!isAiModelDownloaded(model)) throw new Error('The download finished but the file is incomplete. Try downloading it again.');
     send({ type: 'done', modelId: model.id });
   } catch (err) {
@@ -4054,6 +4632,94 @@ app.delete('/api/imagine/:id', (req, res) => {
   res.json({ discarded: true });
 });
 
+// ---- VNC: another computer's desktop, right in a browser tab ----
+// Browsers can't speak the VNC protocol themselves, so the in-browser
+// viewer (noVNC, in public/vendor/novnc) talks to this server over a
+// WebSocket, and this server passes everything straight through to the
+// other computer's VNC port and back. Nothing is decoded or stored here --
+// the VNC login and the screen data go end to end between the viewer and
+// that computer's VNC server.
+//
+// Because this opens someone's desktop, it's locked down: only people who
+// can make changes on this Shelf (the host computer, a logged-in
+// write-access account, or "Anyone can edit" switched on) may use it; it
+// only connects to computers in the Messages list (other Shelf installs);
+// and only to VNC ports (5900-5999).
+const VNC_PORT_MIN = 5900, VNC_PORT_MAX = 5999;
+
+function canUseRemoteDesktop(req) {
+  if (!appOn) return false;
+  if (localhostOnly && !isLocalRequest(req)) return false;
+  if (isLocalRequest(req) || openWriteAccess) return true;
+  const user = getSessionUser(req);
+  return !!(user && user.role === 'write');
+}
+
+function vncTarget(peerId, rawPort) {
+  if (!isValidId(peerId)) return null;
+  const live = onlinePeers.get(peerId);
+  const known = loadKnownPeers()[peerId];
+  const ip = (live && live.ip) || (known && known.ip);
+  const port = Number(rawPort) || VNC_PORT_MIN;
+  if (!ip || !Number.isInteger(port) || port < VNC_PORT_MIN || port > VNC_PORT_MAX) return null;
+  return { ip, port };
+}
+
+// Before connecting, the viewer asks which login methods that computer's
+// VNC offers -- some only work on secure (https or same-computer) pages,
+// and it's kinder to say so up front than to fail halfway through.
+app.get('/api/vnc/:peerId/probe', (req, res) => {
+  if (!canUseRemoteDesktop(req)) return res.status(403).json({ error: 'Only the host computer, or someone allowed to make changes on this Shelf, can open a remote desktop.' });
+  const target = vncTarget(req.params.peerId, req.query.port);
+  if (!target) return res.status(404).json({ error: "That computer isn't in the Messages list, or that isn't a VNC port (5900-5999)." });
+  const sock = net.connect(target.port, target.ip);
+  let buf = Buffer.alloc(0), stage = 'version', version = null, done = false;
+  const finish = (body) => { if (done) return; done = true; sock.destroy(); res.json({ ...body, ip: target.ip, port: target.port }); };
+  sock.setTimeout(4000, () => finish({ ok: false, error: 'timeout' }));
+  sock.on('error', (err) => finish({ ok: false, error: err.code === 'ECONNREFUSED' ? 'refused' : 'unreachable' }));
+  sock.on('close', () => finish({ ok: false, error: 'closed' }));
+  sock.on('data', (d) => {
+    buf = Buffer.concat([buf, d]);
+    if (stage === 'version' && buf.length >= 12) {
+      const m = /^RFB (\d{3})\.(\d{3})\n/.exec(buf.slice(0, 12).toString('latin1'));
+      if (!m) return finish({ ok: false, error: 'not-vnc' });
+      version = `${Number(m[1])}.${Number(m[2])}`;
+      buf = buf.slice(12);
+      if (Number(m[1]) === 3 && Number(m[2]) < 7) { stage = 'type33'; }
+      else { stage = 'types'; sock.write('RFB 003.008\n'); }
+    }
+    if (stage === 'types' && buf.length >= 1) {
+      const n = buf[0];
+      if (n === 0) return finish({ ok: true, version, types: [] });
+      if (buf.length >= 1 + n) return finish({ ok: true, version, types: [...buf.slice(1, 1 + n)] });
+    }
+    if (stage === 'type33' && buf.length >= 4) return finish({ ok: true, version, types: [buf.readUInt32BE(0)] });
+  });
+});
+
+const vncSockets = new WebSocketServer({ noServer: true });
+function handleVncUpgrade(req, socket, head) {
+  const url = new URL(req.url, 'http://x');
+  const m = /^\/api\/vnc\/([^/]+)\/ws$/.exec(url.pathname);
+  if (!m) return false;
+  const reject = (code, text) => { socket.write(`HTTP/1.1 ${code} ${text}\r\nConnection: close\r\n\r\n`); socket.destroy(); };
+  if (!canUseRemoteDesktop(req)) { reject(403, 'Forbidden'); return true; }
+  const target = vncTarget(m[1], url.searchParams.get('port'));
+  if (!target) { reject(404, 'Not Found'); return true; }
+  vncSockets.handleUpgrade(req, socket, head, (ws) => {
+    const tcp = net.connect(target.port, target.ip);
+    tcp.setNoDelay(true);
+    const closeBoth = () => { try { ws.close(); } catch { /* gone */ } tcp.destroy(); };
+    tcp.on('data', (d) => { if (ws.readyState === ws.OPEN) ws.send(d); });
+    tcp.on('error', closeBoth);
+    tcp.on('close', closeBoth);
+    ws.on('message', (d) => { if (!tcp.destroyed) tcp.write(Buffer.isBuffer(d) ? d : Buffer.from(d)); });
+    ws.on('close', closeBoth);
+    ws.on('error', closeBoth);
+  });
+  return true;
+}
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   const ips = getLocalIPs();
   console.log('\nThe Shelf is up.');
@@ -4071,6 +4737,9 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 // this, a slow-but-still-moving upload gets killed mid-chunk for no reason
 // other than taking a while. Disabled entirely rather than just raised,
 // since there's no good universal number for "how slow is too slow" here.
+server.on('upgrade', (req, socket, head) => {
+  if (!handleVncUpgrade(req, socket, head)) socket.destroy();
+});
 server.requestTimeout = 0;
 server.headersTimeout = 0;
 server.timeout = 0;

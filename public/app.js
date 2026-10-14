@@ -59,7 +59,8 @@ const TOOLS = [
   { key: 'messages', label: 'Messages', color: 'var(--cat-Pictures)' },
   { key: 'visitors', label: 'Visitors', color: 'var(--cat-Videos)' },
   { key: 'bigfiles', label: 'Big Transfer', color: 'var(--coral)' },
-  { key: 'ai', label: 'AI', color: 'var(--cat-Books)' }
+  { key: 'ai', label: 'AI', color: 'var(--cat-Books)' },
+  { key: 'tidysuite', label: 'Tidy Suite', color: '#3FA796' }
 ];
 const TOOL_LABELS = Object.fromEntries(TOOLS.map(t => [t.key, t.label]));
 
@@ -194,7 +195,10 @@ const state = {
     activePeerId: null,
     activePeerName: '',
     messages: [],
-    unread: 0
+    unread: 0,
+    known: [],
+    self: null,
+    scanning: false
   }
 };
 
@@ -292,6 +296,28 @@ async function selectTool(key) {
   else if (key === 'visitors') loadVisitorsView();
   else if (key === 'ai') loadAiView();
   else if (key === 'bigfiles') loadBigfilesView();
+  else if (key === 'tidysuite') loadTidySuiteView();
+}
+
+// ---------- Tidy Suite ----------
+// The whole Tidy Suite (Tidy, Neat, Spruce, Steady, Clearout, Handy, Sorted,
+// Hearty, Ready, Stocked, Polished, Chipper, Rugged, Snug) lives in
+// public/tidy-suite/ and opens right here, inside its own dashboard. Each
+// person's work is saved in the browser they use it in, same as opening
+// the suite apps on their own -- Snug makes a backup file to carry it over.
+function loadTidySuiteView() {
+  setToolHeader('Tidy Suite', '14 apps for home, money and getting things done', 'Open in new tab', () => {
+    const frame = el('#tidySuiteFrame');
+    let url = '/tidy-suite/index.html';
+    try { if (frame && frame.contentWindow.location.pathname.startsWith('/tidy-suite/')) url = frame.contentWindow.location.pathname; } catch {}
+    window.open(url, '_blank');
+  });
+  el('#content').innerHTML = `
+    <div class="tidy-suite-bar">
+      <button class="tool-action-btn tool-action-btn-secondary" id="tidySuiteHomeBtn">&larr; All Tidy Suite apps</button>
+    </div>
+    <iframe class="tidy-suite-frame" id="tidySuiteFrame" src="/tidy-suite/index.html" title="Tidy Suite"></iframe>`;
+  el('#tidySuiteHomeBtn').addEventListener('click', () => { el('#tidySuiteFrame').src = '/tidy-suite/index.html'; });
 }
 
 // ---------- Files ----------
@@ -326,6 +352,12 @@ function refreshMusicPlaylistIfPlaying() {
 }
 
 const PLAY_COUNT_CATEGORIES = ['Music', 'Videos', 'Games', 'Programs', 'Books'];
+// Shelves with the Export button (whole shelf as a .zip, or an Excel list).
+const EXPORT_CATEGORIES = ['Pictures', 'Music', 'Videos', 'Games', 'Programs', 'Books'];
+// "Recently added" = the last 30 days, newest first. If nothing's that new,
+// the newest few are shown instead of an empty shelf.
+const RECENT_DAYS = 30;
+const RECENT_FALLBACK_COUNT = 25;
 
 // Shelves that can show a thumbnail image at all. Videos get theirs from
 // the "Get thumbnails" button (grabs a frame); Books make their own
@@ -355,7 +387,9 @@ function updatePlayCountFilterLabels() {
     allLabel = 'All plays'; mostLabel = 'Most played'; neverLabel = 'Never played'; verb = 'Played';
   }
 
-  const opts = [['', allLabel], ['mostplayed', mostLabel]];
+  const opts = [['', allLabel]];
+  if (state.category === 'Music') opts.push(['recent', 'Recently added']);
+  opts.push(['mostplayed', mostLabel]);
   if (state.category === 'Music') opts.push(['artist', 'Artist (A\u2013Z)']);
   opts.push(
     ['0', neverLabel],
@@ -383,7 +417,11 @@ function renderHeader() {
   el('#standardizeNamesBtn').hidden = (state.category !== 'Music' && state.category !== 'Videos') || n === 0;
   el('#fetchArtBtn').hidden = state.category !== 'Music' || n === 0;
   el('#clearArtBtn').hidden = state.category !== 'Music' || !state.files.some(f => f.artUrl);
-  el('#exportListBtn').hidden = state.category !== 'Music' || n === 0;
+  el('#exportListBtn').hidden = !EXPORT_CATEGORIES.includes(state.category) || state.files.length === 0;
+  if (EXPORT_CATEGORIES.includes(state.category)) {
+    const w = EXPORT_WORDS[state.category];
+    el('#exportListBtn').title = `Download all your ${w[0]} as a zip, or the ${w[3].toLowerCase()} as a spreadsheet`;
+  }
   // Books don't need this button any more -- they make their own.
   el('#fetchThumbsBtn').hidden = state.category !== 'Videos' || n === 0;
   el('#fetchThumbsBtn').title = "Grab a thumbnail frame from videos that don't have one yet";
@@ -596,7 +634,7 @@ function renderContent() {
           <span class="thumb-drop-hint">Drop image for thumbnail</span>
         </div>
         <div class="file-name">${escapeHtml(f.name)}</div>
-        <div class="file-meta">${f.sizeLabel} &middot; added ${new Date(f.modified).toLocaleDateString()}</div>
+        <div class="file-meta">${f.sizeLabel} &middot; added ${new Date(f.added || f.modified).toLocaleDateString()}</div>
         <div class="play-count">${formatPlayCount(state.category, f.plays)}</div>
         <div class="card-actions">
           ${PLAYABLE_EXT.has(f.ext) ? `<button class="play-btn" data-name="${encodeURIComponent(f.name)}">Play</button>` : ''}
@@ -789,15 +827,27 @@ async function standardizeNames() {
       }
     });
     const data = finalData || {};
-    if (data.renamedCount === 0) {
-      alert('Nothing to clean up — all names already look tidy.');
+    const skipped = data.skipped || [];
+    const noun = isMusic ? 'song' : 'file';
+    let msg;
+    if (!finalData) {
+      msg = 'The clean-up stopped before it finished. Try again — anything already renamed stays renamed.';
+    } else if (data.renamedCount === 0 && !skipped.length) {
+      msg = `Checked ${data.checkedCount ?? 'all'} ${noun}${data.checkedCount === 1 ? '' : 's'} — every name is already tidy, so nothing needed changing.`;
     } else {
-      let msg = `Renamed ${data.renamedCount} file${data.renamedCount === 1 ? '' : 's'}.`;
+      msg = `Renamed ${data.renamedCount} ${noun}${data.renamedCount === 1 ? '' : 's'}.`;
       if (isMusic && data.correctedCount) {
         msg += ` ${data.correctedCount} unclear guess${data.correctedCount === 1 ? '' : 'es'} corrected via online lookup.`;
       }
-      alert(msg);
     }
+    if (skipped.length) {
+      // Usually a file that's open somewhere else (playing, or open in
+      // another program) -- Windows won't rename a file that's in use.
+      msg += `\n\nCouldn't rename ${skipped.length}:\n` + skipped.slice(0, 8).map(x => `• ${x.name}`).join('\n')
+        + (skipped.length > 8 ? `\n…and ${skipped.length - 8} more` : '')
+        + '\n\nIf one of these is playing or open in another program, stop it and run this again.';
+    }
+    alert(msg);
     loadFiles();
   } catch (err) {
     alert(err.message);
@@ -1597,7 +1647,7 @@ function applyFilters() {
     if (q && !f.name.toLowerCase().includes(q)) return false;
     // "mostplayed" and "artist" are sort modes, not thresholds — handled
     // by sorting below instead of filtering here.
-    if (playFilter && playFilter !== 'mostplayed' && playFilter !== 'artist') {
+    if (playFilter && playFilter !== 'mostplayed' && playFilter !== 'artist' && playFilter !== 'recent') {
       const plays = f.plays || 0;
       if (playFilter === '0') return plays === 0;
       return plays >= parseInt(playFilter, 10); // "1+" -> 1, "5+" -> 5, etc.
@@ -1605,7 +1655,13 @@ function applyFilters() {
     return true;
   });
 
-  if (playFilter === 'mostplayed') {
+  if (playFilter === 'recent') {
+    const addedOf = (f) => f.added || f.modified || 0;
+    const newest = filtered.slice().sort((a, b) => addedOf(b) - addedOf(a));
+    const cutoff = Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000;
+    const recent = newest.filter(f => addedOf(f) >= cutoff);
+    filtered = recent.length ? recent : newest.slice(0, RECENT_FALLBACK_COUNT);
+  } else if (playFilter === 'mostplayed') {
     filtered = filtered.slice().sort((a, b) => (b.plays || 0) - (a.plays || 0) || a.name.localeCompare(b.name));
   } else if (playFilter === 'artist') {
     // Untagged tracks sort to the end rather than clumping at the top
@@ -2795,11 +2851,25 @@ el('#clearArtBtn').addEventListener('click', clearAlbumArt);
 // on its own (and streams it to disk -- important for a multi-GB zip, which
 // fetch+blob would have to hold entirely in memory first).
 const exportBackdrop = el('#exportBackdrop');
+// Wording per shelf: [title noun, one item, many items, list name, what the list leaves out]
+const EXPORT_WORDS = {
+  Pictures: ['pictures', 'picture', 'pictures', 'Picture list', 'names, sizes and dates — no image files'],
+  Music:    ['music', 'song', 'songs', 'Song list', 'names, artists, plays, sizes and dates — no audio'],
+  Videos:   ['videos', 'video', 'videos', 'Video list', 'names, plays, sizes and dates — no video files'],
+  Games:    ['games', 'game', 'games', 'Game list', 'names, plays, sizes and dates — no game files'],
+  Programs: ['programs', 'program', 'programs', 'Program list', 'names, downloads, sizes and dates — no program files'],
+  Books:    ['PDFs', 'PDF', 'PDFs', 'PDF list', 'names, times read, sizes and dates — no PDF files'],
+};
 function openExportChoice() {
   const files = state.files;
   const total = files.reduce((sum, f) => sum + (f.size || 0), 0);
+  const [noun, one, many, listName, listSub] = EXPORT_WORDS[state.category] || EXPORT_WORDS.Music;
+  el('#exportTitle').textContent = `Export your ${noun}`;
+  el('#exportZipTitle').textContent = 'Complete library (.zip)';
+  el('#exportSheetTitle').textContent = `${listName} (Excel)`;
+  el('#exportSheetSub').textContent = `A spreadsheet of ${listSub}`;
   el('#exportZipSub').textContent =
-    `All ${files.length} song${files.length === 1 ? '' : 's'} in one download — ${humanFileSize(total)}`;
+    `All ${files.length} ${files.length === 1 ? one : many} in one download — ${humanFileSize(total)}`;
   exportBackdrop.hidden = false;
 }
 function closeExportChoice() { exportBackdrop.hidden = true; }
@@ -5086,24 +5156,56 @@ async function refreshIdentity() {
 }
 
 async function pollMessagingOnce() {
-  const [peers, conversations] = await Promise.all([
+  const [peers, conversations, known, self] = await Promise.all([
     fetch('/api/messaging/peers').then(r => r.json()),
-    fetch('/api/messaging/conversations').then(r => r.json())
+    fetch('/api/messaging/conversations').then(r => r.json()),
+    fetch('/api/messaging/known-peers').then(r => r.json()).catch(() => []),
+    fetch('/api/messaging/self').then(r => r.json()).catch(() => null),
   ]);
   state.messaging.peers = peers;
   state.messaging.conversations = conversations;
+  state.messaging.known = known;
+  state.messaging.self = self;
   state.messaging.unread = conversations.reduce((sum, c) => sum + (c.unread || 0), 0);
+  checkForNewMessages(conversations);
 
-  if (state.messaging.activePeerId) {
-    state.messaging.messages = await fetch(`/api/messaging/conversations/${state.messaging.activePeerId}`).then(r => r.json());
+  // The open chat is only re-downloaded when something in it changed --
+  // it carries any shared pictures, so fetching it every 3 seconds was a
+  // lot of work for a Raspberry Pi (and its browser) for nothing.
+  const m = state.messaging;
+  if (m.activePeerId) {
+    const c = conversations.find(x => x.id === m.activePeerId);
+    const key = `${m.activePeerId}|${c ? c.lastAt : 0}|${c ? c.unread : 0}`;
+    if (key !== m.activeKey || !Array.isArray(m.messages)) {
+      m.messages = await fetch(`/api/messaging/conversations/${m.activePeerId}`).then(r => r.json());
+      m.activeKey = `${m.activePeerId}|${c ? c.lastAt : 0}|0`; // reading it marks it read
+    }
   }
+}
+
+// What the Messages screen shows, minus the clock -- so the 3-second
+// refresh only rebuilds the screen when something actually changed (or
+// every 30 seconds, to keep "last checked 2 min ago" current).
+function messagingSignature() {
+  const m = state.messaging;
+  const self = m.self ? { ...m.self, lastScan: m.self.lastScan ? { ...m.self.lastScan, at: 0 } : null } : null;
+  const strip = (list) => (list || []).map(({ lastSeen, lastSeenAt, ...rest }) => rest); // timestamps that tick every few seconds
+  return JSON.stringify([strip(m.peers), m.conversations, strip(m.known), self, m.activePeerId, m.messages && m.messages.length,
+    m.messages && m.messages.length && m.messages[m.messages.length - 1].timestamp]);
 }
 
 function startMessagingPolling() {
   clearInterval(messagingViewTimer);
+  let lastSig = '', lastRenderAt = 0;
   messagingViewTimer = setInterval(async () => {
-    await pollMessagingOnce();
-    if (state.view === 'messages') renderMessages();
+    if (document.hidden) return; // nobody's looking -- the background badge check still catches new messages
+    try { await pollMessagingOnce(); } catch { return; }
+    if (state.view !== 'messages') return;
+    const sig = messagingSignature();
+    if (sig !== lastSig || Date.now() - lastRenderAt > 30000) {
+      lastSig = sig; lastRenderAt = Date.now();
+      renderMessages();
+    }
   }, 3000);
 }
 
@@ -5114,14 +5216,138 @@ function stopMessagingPolling() {
 
 // Lightweight background poll so the unread badge on the "Messages" tab
 // stays current even while you're looking at something else.
+let lastBadgeCheck = 0;
 async function refreshUnreadBadge() {
+  if (state.view === 'messages' && !document.hidden) return; // the Messages tab's own 3-second poll covers it
+  // In a background tab, check every 15 seconds instead of every 4 --
+  // still soon enough for a new-message notice, far less work.
+  if (document.hidden && Date.now() - lastBadgeCheck < 15000) return;
+  lastBadgeCheck = Date.now();
   try {
     const conversations = await fetch('/api/messaging/conversations').then(r => r.json());
     state.messaging.unread = conversations.reduce((sum, c) => sum + (c.unread || 0), 0);
-    if (state.view !== 'messages') renderToolNav();
+    checkForNewMessages(conversations);
+    renderToolNav();
   } catch { /* server not ready yet, or briefly offline — just skip this tick */ }
 }
-setInterval(refreshUnreadBadge, 8000);
+setInterval(refreshUnreadBadge, 4000);
+
+// ---------- New-message notifications ----------
+// Works anywhere in the app, not just the Messages tab: a pop-up notice
+// (click it to open the conversation), a short chime, the browser tab's
+// title, and -- on the host computer, if allowed -- a system notification.
+// Detection watches each conversation's newest INCOMING message rather
+// than the unread count, because an open conversation marks messages read
+// straight away, and you'd still want to hear about one arriving while
+// you're in another app.
+const lastIncomingSeen = new Map(); // conversation id -> timestamp of the newest incoming message already known
+let incomingInitialized = false;
+let unseenWhileAway = 0;
+const BASE_TITLE = document.title;
+
+function msgSoundOn() {
+  try { return localStorage.getItem('shelf-msg-sound') !== '0'; } catch { return true; }
+}
+
+function checkForNewMessages(conversations) {
+  const fresh = [];
+  for (const c of conversations) {
+    const prev = lastIncomingSeen.get(c.id) || 0;
+    if (c.lastInAt && c.lastInAt > prev) {
+      if (incomingInitialized) fresh.push(c);
+      lastIncomingSeen.set(c.id, c.lastInAt);
+    }
+  }
+  incomingInitialized = true; // the first look just records what's already there
+  for (const c of fresh) notifyNewMessage(c);
+}
+
+function isLookingAtConversation(id) {
+  return state.view === 'messages' && state.messaging.activePeerId === id
+    && document.visibilityState === 'visible' && document.hasFocus();
+}
+
+function notifyNewMessage(c) {
+  if (isLookingAtConversation(c.id)) return; // it's already on screen in front of you
+  const preview = (c.lastInPreview || '').slice(0, 140);
+  showMessageToast(c, preview);
+  if (msgSoundOn()) playMessageChime();
+  if (document.visibilityState !== 'visible' || !document.hasFocus()) {
+    unseenWhileAway++;
+    document.title = `(${unseenWhileAway}) New message \u2014 ${BASE_TITLE}`;
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        const n = new Notification(`New message from ${c.name}`, { body: preview, tag: `shelf-msg-${c.id}` });
+        n.onclick = () => { window.focus(); openConversationFromNotice(c); n.close(); };
+      } catch { /* some browsers only allow notifications from a service worker */ }
+    }
+  }
+}
+function clearAwayTitle() { unseenWhileAway = 0; document.title = BASE_TITLE; }
+window.addEventListener('focus', clearAwayTitle);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && document.hasFocus()) clearAwayTitle(); });
+
+async function openConversationFromNotice(c) {
+  if (state.view !== 'messages') await selectTool('messages');
+  openConversation(c.id, c.name);
+}
+
+function showMessageToast(c, preview) {
+  let stack = el('#toastStack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'toastStack';
+    stack.className = 'toast-stack';
+    stack.setAttribute('aria-live', 'polite');
+    document.body.appendChild(stack);
+  }
+  // One notice per conversation: a newer message updates the existing one.
+  let toast = stack.querySelector(`[data-conv="${CSS.escape(c.id)}"]`);
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.dataset.conv = c.id;
+    toast.setAttribute('role', 'status');
+    toast.innerHTML = `
+      <button class="toast-body" type="button"><span class="toast-title"></span><span class="toast-text"></span></button>
+      <button class="toast-close" type="button" aria-label="Dismiss">&times;</button>`;
+    toast.querySelector('.toast-body').addEventListener('click', () => { toast.remove(); openConversationFromNotice(c); });
+    toast.querySelector('.toast-close').addEventListener('click', () => toast.remove());
+    stack.appendChild(toast);
+  }
+  toast.querySelector('.toast-title').textContent = `New message from ${c.name}`;
+  toast.querySelector('.toast-text').textContent = preview;
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => toast.remove(), 10000);
+}
+
+// A soft two-note chime, made on the spot -- no sound file to load.
+// Browsers only allow sound after the page has been clicked or tapped
+// once, so the audio is unlocked on the first interaction.
+let chimeCtx = null;
+function unlockChime() {
+  try {
+    if (!chimeCtx) chimeCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (chimeCtx.state === 'suspended') chimeCtx.resume();
+  } catch { /* no Web Audio -- just no chime */ }
+}
+document.addEventListener('pointerdown', unlockChime, { once: true });
+document.addEventListener('keydown', unlockChime, { once: true });
+function playMessageChime() {
+  if (!chimeCtx) return;
+  try {
+    const t = chimeCtx.currentTime;
+    [[880, 0], [1318.5, 0.12]].forEach(([freq, delay]) => {
+      const osc = chimeCtx.createOscillator(), gain = chimeCtx.createGain();
+      osc.type = 'sine'; osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t + delay);
+      gain.gain.exponentialRampToValueAtTime(0.18, t + delay + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.45);
+      osc.connect(gain).connect(chimeCtx.destination);
+      osc.start(t + delay); osc.stop(t + delay + 0.5);
+    });
+  } catch { /* cosmetic */ }
+}
 
 // ---------- Visitors ----------
 // Every device that's loaded the main page gets logged server-side (see
@@ -5179,7 +5405,38 @@ function renderMessages() {
   const content = el('#content');
   const m = state.messaging;
   const convPeerIds = new Set(m.conversations.map(c => c.id));
-  const onlineOnly = m.peers.filter(p => !convPeerIds.has(p.id));
+  // Everyone ever seen on the network who isn't already in a conversation:
+  // online first, then the rest by when they were last seen.
+  const onlineById = new Map(m.peers.map(p => [p.id, p]));
+  const seen = new Map((m.known || []).map(k => [k.id, k]));
+  for (const p of m.peers) if (!seen.has(p.id)) seen.set(p.id, { id: p.id, name: p.name, ip: p.ip, online: true, lastSeenAt: Date.now() });
+  const others = [...seen.values()].filter(k => !convPeerIds.has(k.id)).map(k => {
+    const live = onlineById.get(k.id);
+    return { ...k, online: !!live, status: live ? live.status : 'offline', ip: (live && live.ip) || k.ip, name: (live && live.name) || k.name, httpPort: (live && live.httpPort) || k.httpPort };
+  });
+  const onlineOthers = others.filter(p => p.online);
+  // Two computers sharing one identity (see messagingNoticesHtml) would
+  // otherwise show as a single entry flipping between them -- list each.
+  const sharedIds = new Set();
+  for (const d of (m.self && m.self.sharedIdentities) || []) {
+    sharedIds.add(d.id);
+    const shown = new Set([...others, ...m.conversations].filter(x => x.id === d.id).map(x => x.ip));
+    for (const c of d.computers) {
+      if (shown.has(c.ip)) continue;
+      shown.add(c.ip);
+      onlineOthers.push({ id: d.id, name: c.name, ip: c.ip, online: true, status: 'online', httpPort: 8080 });
+    }
+  }
+  const offlineOthers = others.filter(p => !p.online).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  const peerMeta = (p) => `${p.ip ? `<span class="peer-ip">${escapeHtml(p.ip)}</span>` : ''}${sharedIds.has(p.id) ? '<span class="peer-seen"> &middot; shared identity</span>' : ''}${!p.online && p.lastSeenAt ? `<span class="peer-seen">${p.ip ? ' &middot; ' : ''}last seen ${timeAgo(p.lastSeenAt)}</span>` : ''}`;
+  const peerRow = (p) => `
+          <div class="peer-row ${p.online ? '' : 'offline'}" data-id="${p.id}" data-name="${escapeHtml(p.name)}" data-ip="${escapeHtml(p.ip || '')}" data-port="${escapeHtml(String(p.httpPort || ''))}">
+            <span class="status-dot-inline status-${p.online ? p.status : 'offline'}"></span>
+            <div class="conv-name-wrap">
+              <span class="peer-name">${escapeHtml(p.name)}</span>
+              <span class="peer-meta">${peerMeta(p)}</span>
+            </div>
+          </div>`;
 
   // The 3-second background poll calls this same render function, which
   // rebuilds the whole panel's markup -- including the message box you
@@ -5187,8 +5444,15 @@ function renderMessages() {
   // position) beforehand so we can put it right back after, instead of
   // silently wiping out what you were typing.
   const focused = document.activeElement;
-  const preserve = (focused && content.contains(focused) && (focused.id === 'messageInput' || focused.id === 'myNameInput'))
+  const preserve = (focused && content.contains(focused) && (focused.id === 'messageInput' || focused.id === 'myNameInput' || focused.id === 'addPeerInput'))
     ? { id: focused.id, value: focused.value, selectionStart: focused.selectionStart, selectionEnd: focused.selectionEnd }
+    : null;
+
+  // Keep your place in a long chat: the background refresh rebuilds the
+  // thread, which used to jump to the bottom even while you scrolled back.
+  const oldBox = el('#threadMessages');
+  const oldScroll = oldBox && oldBox.dataset.peer === String(m.activePeerId)
+    ? { top: oldBox.scrollTop, atBottom: oldBox.scrollHeight - oldBox.scrollTop - oldBox.clientHeight < 40, count: oldBox.childElementCount }
     : null;
 
   content.innerHTML = `
@@ -5202,32 +5466,41 @@ function renderMessages() {
       <select id="myStatusSelect" ${m.identity.status === 'offline' ? 'disabled' : ''}>
         ${Object.entries(STATUS_LABELS).filter(([val]) => val !== 'offline').map(([val, label]) => `<option value="${val}" ${m.identity.status === val ? 'selected' : ''}>${label}</option>`).join('')}
       </select>
-      <span style="color:var(--text-muted); font-size:12.5px;">This is how others on your network see you.</span>
+      <span style="color:var(--text-muted); font-size:12.5px;">This is how others on your network see you${m.self && m.self.addresses && m.self.addresses.length ? ` &mdash; at <strong class="self-address">${m.self.addresses.map(escapeHtml).join(', ')}</strong>` : ''}.</span>
     </div>
-    <div class="split-pane">
+    <div class="messaging-tools">
+      <button class="tool-action-btn tool-action-btn-secondary" id="scanNetworkBtn" ${m.scanning ? 'disabled' : ''}>${m.scanning ? 'Scanning&hellip;' : 'Scan network'}</button>
+      <span class="scan-status">${scanStatusText(m)}</span>
+      <form class="add-peer" id="addPeerForm">
+        <input type="text" id="addPeerInput" placeholder="Add by address, e.g. 10.0.0.62" autocomplete="off" spellcheck="false" value="${escapeHtml(m.addDraft || '')}">
+        <button class="tool-action-btn tool-action-btn-secondary" type="submit" ${m.adding ? 'disabled' : ''}>${m.adding ? 'Checking&hellip;' : 'Add'}</button>
+      </form>
+      <label class="msg-sound-toggle"><input type="checkbox" id="msgSoundToggle" ${msgSoundOn() ? 'checked' : ''}> Sound for new messages</label>
+      ${'Notification' in window && window.isSecureContext && Notification.permission === 'default'
+        ? '<button class="link-btn" id="enableDesktopNotices">Turn on desktop notifications</button>' : ''}
+    </div>
+    ${messagingNoticesHtml(m)}
+    <div class="split-pane msg-pane">
       <div class="split-list">
-        ${onlineOnly.length ? `<div class="list-section-label">Online now</div>` : ''}
-        ${onlineOnly.map(p => `
-          <div class="peer-row" data-id="${p.id}" data-name="${escapeHtml(p.name)}" ${p.ip ? `title="${escapeHtml(p.ip)}"` : ''}>
-            <span class="status-dot-inline status-${p.status}"></span>
-            <span class="peer-name">${escapeHtml(p.name)}</span>
-          </div>
-        `).join('')}
         ${m.conversations.length ? `<div class="list-section-label">Conversations</div>` : ''}
         ${m.conversations.map(c => `
-          <div class="conv-row ${c.id === m.activePeerId ? 'active' : ''}" data-id="${c.id}" data-name="${escapeHtml(c.name)}" ${c.online && c.ip ? `title="${escapeHtml(c.ip)}"` : ''}>
+          <div class="conv-row ${c.id === m.activePeerId ? 'active' : ''}" data-id="${c.id}" data-name="${escapeHtml(c.name)}" data-ip="${escapeHtml(c.ip || '')}" data-port="${escapeHtml(String(c.httpPort || ''))}">
             <span class="status-dot-inline ${c.online ? 'status-online' : 'status-offline'}"></span>
             <div class="conv-name-wrap">
               <span class="conv-name">${escapeHtml(c.name)}</span>
+              ${c.ip ? `<span class="peer-meta"><span class="peer-ip">${escapeHtml(c.ip)}</span></span>` : ''}
               <span class="conv-preview">${escapeHtml(c.lastMessage || '')}</span>
             </div>
             ${c.unread ? `<span class="unread-badge">${c.unread}</span>` : ''}
           </div>
-        `).join('') || (onlineOnly.length ? '' : '<p style="color:var(--text-muted);font-size:13px;padding:8px 12px;">No one else found on your network yet.</p>')}
+        `).join('')}
+        ${onlineOthers.length ? `<div class="list-section-label">Online now</div>${onlineOthers.map(peerRow).join('')}` : ''}
+        ${offlineOthers.length ? `<div class="list-section-label">Seen before</div>${offlineOthers.map(peerRow).join('')}` : ''}
+        ${!m.conversations.length && !others.length ? `<p class="no-peers">No other copies of The Shelf found on your network yet. ${m.scanning ? 'Scanning now&hellip;' : 'Try <strong>Scan network</strong> above.'}</p>` : ''}
       </div>
       <div class="thread-wrap">
         ${m.activePeerId ? `
-          <div class="thread-messages" id="threadMessages">
+          <div class="thread-messages" id="threadMessages" data-peer="${escapeHtml(String(m.activePeerId))}">
             ${m.messages.map(msg => `
               <div class="msg-bubble ${msg.direction}">
                 ${msg.image ? `<img src="${msg.image}" class="msg-image" alt="Shared image">` : ''}
@@ -5245,13 +5518,21 @@ function renderMessages() {
     </div>
   `;
 
-  content.querySelectorAll('.peer-row').forEach(row => {
-    row.addEventListener('click', () => openConversation(row.dataset.id, row.dataset.name));
-  });
-  content.querySelectorAll('.conv-row').forEach(row => {
-    row.addEventListener('click', () => openConversation(row.dataset.id, row.dataset.name));
+  content.querySelectorAll('.peer-row, .conv-row').forEach(row => {
+    row.addEventListener('click', (e) => openPeerMenu(row, e));
   });
 
+  el('#scanNetworkBtn').addEventListener('click', runNetworkScan);
+  el('#addPeerForm').addEventListener('submit', (e) => { e.preventDefault(); addPeerByAddress(el('#addPeerInput').value); });
+  el('#addPeerInput').addEventListener('input', (e) => { state.messaging.addDraft = e.target.value; });
+  const dismiss = el('#addResultDismiss');
+  if (dismiss) dismiss.addEventListener('click', () => { state.messaging.addResult = null; renderMessages(); });
+  el('#msgSoundToggle').addEventListener('change', (e) => {
+    try { localStorage.setItem('shelf-msg-sound', e.target.checked ? '1' : '0'); } catch { /* fine */ }
+    if (e.target.checked) { unlockChime(); playMessageChime(); } // a preview of what it sounds like
+  });
+  const noticeBtn = el('#enableDesktopNotices');
+  if (noticeBtn) noticeBtn.addEventListener('click', async () => { try { await Notification.requestPermission(); } catch { /* ignored */ } renderMessages(); });
   el('#myNameInput').addEventListener('change', (e) => updateIdentity({ name: e.target.value }));
   el('#myStatusSelect').addEventListener('change', (e) => updateIdentity({ status: e.target.value }));
   el('#onlineToggle').addEventListener('change', async (e) => {
@@ -5267,7 +5548,12 @@ function renderMessages() {
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
 
     const box = el('#threadMessages');
-    if (box) box.scrollTop = box.scrollHeight;
+    if (box) {
+      const newOnes = oldScroll && box.childElementCount > oldScroll.count;
+      const lastIsMine = box.lastElementChild && box.lastElementChild.classList.contains('out');
+      if (oldScroll && !oldScroll.atBottom && !(newOnes && lastIsMine)) box.scrollTop = oldScroll.top;
+      else box.scrollTop = box.scrollHeight;
+    }
   }
 
   if (preserve) {
@@ -5278,6 +5564,134 @@ function renderMessages() {
       try { toRestore.setSelectionRange(preserve.selectionStart, preserve.selectionEnd); } catch { /* not all input types support this */ }
     }
   }
+}
+
+function timeAgo(ts) {
+  const s = Math.max(0, (Date.now() - ts) / 1000);
+  if (s < 90) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  const d = Math.round(s / 86400);
+  return d === 1 ? 'yesterday' : `${d} days ago`;
+}
+
+function scanStatusText(m) {
+  if (m.scanning) return 'Checking every address on your network&hellip;';
+  const scan = m.self && m.self.lastScan;
+  if (!scan || !scan.at) return '';
+  const online = m.peers.length;
+  const ranges = scan.ranges && scan.ranges.length ? ` <span class="scan-range">(${scan.ranges.map(escapeHtml).join(', ')})</span>` : '';
+  return `Last checked ${timeAgo(scan.at)}${ranges} &middot; ${online} other ${online === 1 ? 'copy' : 'copies'} online`;
+}
+
+// Warnings above the list: two computers sharing one identity, this
+// computer having just fixed a clash, and the result of "Add by address".
+function messagingNoticesHtml(m) {
+  const notes = [];
+  const self = m.self || {};
+  for (const d of self.sharedIdentities || []) {
+    const list = d.computers.map(c => `<strong>${escapeHtml(c.name)}</strong> (${escapeHtml(c.ip)})`).join(' and ');
+    notes.push(`<div class="msg-notice warn"><p>${list} are using the <strong>same Shelf identity</strong>, so they show up as one entry that keeps switching between them. This usually happens when one was set up from the other's backup.</p>
+      <p><strong>Fix:</strong> install this version of The Shelf on both. The first time they see each other, one takes a new identity, and both then appear here separately. Messages can't be sent reliably to either until then.</p></div>`);
+  }
+  const clash = self.identityClash;
+  if (clash && Date.now() - clash.at < 10 * 60 * 1000) {
+    notes.push(`<div class="msg-notice"><p>The computer at <strong>${escapeHtml(clash.withIp)}</strong> was using this computer's identity, so this computer took a new one${clash.newName !== clash.oldName ? ` and is now called <strong>${escapeHtml(clash.newName)}</strong>` : ''}. Both should now show up separately for everyone.</p></div>`);
+  }
+  const r = m.addResult;
+  if (r) {
+    notes.push(`<div class="msg-notice ${r.ok ? 'ok' : 'warn'}"><p>${r.html}</p><button class="link-btn" id="addResultDismiss">Dismiss</button></div>`);
+  }
+  return notes.join('');
+}
+
+async function addPeerByAddress(address) {
+  address = (address || '').trim();
+  if (!address) return;
+  const m = state.messaging;
+  m.adding = true; m.addResult = null;
+  renderMessages();
+  const ask = () => fetch('/api/messaging/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address }) }).then(r => r.json());
+  try {
+    let data = await ask();
+    if (data.retry) data = await ask(); // this computer just fixed an identity clash -- the second try succeeds
+    if (data.ok) {
+      m.addResult = { ok: true, html: `Added <strong>${escapeHtml(data.peer.name)}</strong> at ${escapeHtml(data.peer.ip)}.${data.older ? ' It’s running an older version of The Shelf — updating it makes it easier to find.' : ''}${data.warning ? ' ' + escapeHtml(data.warning) : ''}` };
+      m.addDraft = '';
+    } else {
+      m.addResult = { ok: false, html: escapeHtml(data.message || data.error || 'Could not add that computer.') };
+    }
+  } catch {
+    m.addResult = { ok: false, html: 'Could not check that address.' };
+  }
+  m.adding = false;
+  await pollMessagingOnce();
+  if (state.view === 'messages') renderMessages();
+}
+
+async function runNetworkScan() {
+  state.messaging.scanning = true;
+  renderMessages();
+  try { await fetch('/api/messaging/scan', { method: 'POST' }); } catch { /* shown as nothing found */ }
+  state.messaging.scanning = false;
+  await pollMessagingOnce();
+  if (state.view === 'messages') renderMessages();
+}
+
+// Clicking someone in the list asks how to connect: chat with them, open
+// their Shelf in a new tab, or see and control their desktop over VNC in a
+// new tab (vnc.html talks to their VNC server through this Shelf -- see
+// the VNC relay in server.js).
+function openPeerMenu(row, evt) {
+  closePeerMenu();
+  const { id, name, ip, port } = row.dataset;
+  const menu = document.createElement('div');
+  menu.className = 'peer-menu';
+  menu.id = 'peerMenu';
+  menu.setAttribute('role', 'menu');
+  const shelfUrl = ip ? `http://${ip}:${port || 8080}/` : null;
+  menu.innerHTML = `
+    <div class="peer-menu-head"><strong>${escapeHtml(name)}</strong>${ip ? `<span>${escapeHtml(ip)}</span>` : ''}</div>
+    <button role="menuitem" data-act="message"><span class="pm-title">Message</span><span class="pm-sub">Chat here</span></button>
+    <button role="menuitem" data-act="shelf" ${shelfUrl ? '' : 'disabled'}><span class="pm-title">Connect Shelf</span><span class="pm-sub">${shelfUrl ? `Open their Shelf in a new tab` : 'Address not known yet'}</span></button>
+    <button role="menuitem" data-act="vnc" ${ip ? '' : 'disabled'}><span class="pm-title">Connect VNC</span><span class="pm-sub">${ip ? 'See and control their desktop in a new tab' : 'Address not known yet'}</span></button>`;
+  document.body.appendChild(menu);
+
+  // Next to the row, kept on screen.
+  const r = row.getBoundingClientRect();
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let left = Math.min(r.right + 6, window.innerWidth - mw - 8);
+  if (left < r.left + 40) left = Math.max(8, Math.min(r.left, window.innerWidth - mw - 8));
+  let top = Math.min(r.top, window.innerHeight - mh - 8);
+  if (left === r.left || left < r.right) top = Math.min(r.bottom + 4, window.innerHeight - mh - 8);
+  menu.style.left = `${Math.max(8, left)}px`;
+  menu.style.top = `${Math.max(8, top)}px`;
+
+  menu.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn || btn.disabled) return;
+    closePeerMenu();
+    if (btn.dataset.act === 'message') openConversation(id, name);
+    else if (btn.dataset.act === 'shelf') window.open(shelfUrl, '_blank', 'noopener');
+    else if (btn.dataset.act === 'vnc') {
+      const q = new URLSearchParams({ peer: id, name, ip });
+      window.open(`/vnc.html?${q}`, '_blank', 'noopener');
+    }
+  });
+  menu.querySelector('button:not([disabled])').focus();
+  setTimeout(() => {
+    document.addEventListener('pointerdown', onPeerMenuOutside, true);
+    document.addEventListener('keydown', onPeerMenuKey, true);
+  }, 0);
+  evt.stopPropagation();
+}
+function onPeerMenuOutside(e) { if (!e.target.closest('#peerMenu')) closePeerMenu(); }
+function onPeerMenuKey(e) { if (e.key === 'Escape') closePeerMenu(); }
+function closePeerMenu() {
+  const m = document.getElementById('peerMenu');
+  if (m) m.remove();
+  document.removeEventListener('pointerdown', onPeerMenuOutside, true);
+  document.removeEventListener('keydown', onPeerMenuKey, true);
 }
 
 async function updateIdentity(patch) {

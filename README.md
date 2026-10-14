@@ -13,8 +13,6 @@ network, including the AI tab (it downloads a small model once, then runs fully 
 (The one exception is the optional weather reading on the Home tab, which needs this
 computer to have internet access — see below.)
 
-![The Shelf screenshot](<docs/The Shelf - screenshot.png>)
-
 ## What you need
 
 - [Node.js](https://nodejs.org) installed on the computer that will host it (the "server").
@@ -306,6 +304,15 @@ remember (except the draw pad, which has its own Save so you control when a draw
   `localhost` doesn't count. There's a **Clear all** button if you'd rather not keep this
   history around.
 
+- **Tidy Suite**: all 14 Tidy Suite apps in one tab — Tidy (spreadsheets), Neat (writing),
+  Spruce (slides), Steady (bills & debt), Clearout (selling), Handy (side income), Sorted
+  (repairs), Hearty (meals), Ready (calendar & to-dos), Stocked (home inventory), Polished
+  (job hunt), Chipper (chores & allowance), Rugged (grid-down living) and Snug (backup).
+  The tab opens the suite's own dashboard; pick an app to open it right there, use
+  **All Tidy Suite apps** to go back, or **Open in new tab** to give it the whole window.
+  Anyone on the network gets this tab. Each person's suite work is saved in the browser they
+  use it in — use **Snug** to make a backup file or move work to another device.
+
 ### Accounts & access control
 
 By default ("Anonymous read only"), anyone on your network can open The Shelf and browse
@@ -370,6 +377,30 @@ everything loads correctly.
 - Zipped games get unzipped into a hidden `shared/.extracted/` folder the first time they're
   played. This is cleaned up automatically if you remove or move the zip, so you don't need
   to manage it yourself.
+
+### Connecting to another computer (Shelf or VNC)
+
+In **Messages**, click anyone in the list and choose:
+
+- **Message** — chat, as before.
+- **Connect Shelf** — opens their Shelf in a new browser tab.
+- **Connect VNC** — opens their desktop in a new tab, so you can see and control it from the
+  browser (works from a phone too). That computer needs a VNC server turned on:
+  - Raspberry Pi: `sudo raspi-config` → Interface Options → VNC → Enable.
+  - Mac: System Settings → General → Sharing → Screen Sharing.
+  - Windows: install a VNC server such as TightVNC or RealVNC Server.
+
+The browser can't speak VNC itself, so The Shelf on the computer you're browsing passes the
+connection through to the other computer's VNC port (5900–5999). The VNC login goes straight
+to that computer and is never stored. Only the host computer, or someone allowed to make
+changes on this Shelf, can use it, and only to computers in the Messages list.
+
+**One limit:** the Raspberry Pi's default encrypted VNC login, and Mac Screen Sharing, need
+the browser's built-in encryption — which browsers only allow on secure pages. They work when
+you open The Shelf on the host computer itself; from a phone or another computer (a plain
+`http://` page) they can't be used, and the VNC tab says so. A standard **VNC password** login
+works from anywhere (on RealVNC Server: Options → Security → Authentication → VNC password,
+Encryption → Prefer off), or use the tab's **Open in a VNC app instead** button.
 
 ## Changing the port
 
