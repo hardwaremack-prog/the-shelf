@@ -17,6 +17,40 @@ computer to have internet access — see below.)
 
 ![The Shelf — Pictures shelf](docs/screenshots/pictures.png)
 
+### Every Shelf finds every other Shelf
+
+Put The Shelf on a couple of computers — the Raspberry Pi in the den, the kitchen laptop, the
+kids' PC — and they find each other on their own. No accounts, no adding contacts, no typing
+IP addresses. Each one just shows up in **Messages**, already named and marked online.
+
+![Messages — chatting between two Shelves](docs/screenshots/messages.png)
+
+Then it's a real chat app for your house: send a message, paste a picture straight in with
+Ctrl+V, get a ping when something new arrives. Everything goes directly from one computer to
+the other over your own network — it never touches the internet.
+
+Click anyone in the list and you can do more than chat. **Connect Shelf** opens their whole
+Shelf in a new tab, so you can grab their pictures, music, and games. **Connect VNC** puts
+their actual desktop in your browser so you can see and control it — handy for helping
+someone out from the other room, even from your phone.
+
+![Click any Shelf to message it, open it, or take over its desktop](docs/screenshots/messages-found.png)
+
+If one ever hides from you (say, it's on a guest Wi-Fi), hit **Scan network** or type its
+address into **Add by address**, and it tells you in plain words what's wrong.
+
+### AI with one switch
+
+A chat assistant that runs entirely on your own computer — no account, no API key, no monthly
+bill, and nothing you type ever leaves the machine. Turning it on is one switch. The Shelf
+checks how much memory the computer has, lists the models that will fit (from tiny ones for a
+Raspberry Pi up to bigger, smarter ones for a desktop), and marks the one it recommends. Click
+**Download & use** and that's it — after the one-time download it works fully offline.
+
+![AI tab — flip it on, pick the recommended model, done](docs/screenshots/ai.png)
+
+### Everything else
+
 | | |
 |:---:|:---:|
 | ![Home dashboard](docs/screenshots/home.png) | ![Music](docs/screenshots/music.png) |
