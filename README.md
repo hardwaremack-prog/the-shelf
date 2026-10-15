@@ -13,6 +13,25 @@ network, including the AI tab (it downloads a small model once, then runs fully 
 (The one exception is the optional weather reading on the Home tab, which needs this
 computer to have internet access — see below.)
 
+## Screenshots
+
+![The Shelf — Pictures shelf](docs/screenshots/pictures.png)
+
+| | |
+|:---:|:---:|
+| ![Home dashboard](docs/screenshots/home.png) | ![Music](docs/screenshots/music.png) |
+| **Home** — bulletin board, quick links, backup | **Music** — shuffle play, album art, play counts |
+| ![Games](docs/screenshots/games.png) | ![Books / PDFs](docs/screenshots/books-pdfs.png) |
+| **Games** — play right in the browser | **Books / PDFs** — read or download |
+| ![Videos](docs/screenshots/videos.png) | ![Notes](docs/screenshots/notes.png) |
+| **Videos** | **Notes** |
+| ![Draw](docs/screenshots/draw.png) | ![Docs](docs/screenshots/docs.png) |
+| **Draw** — a simple drawing pad | **Docs** — a little word processor |
+| ![Sheets](docs/screenshots/sheets.png) | ![Tidy Suite](docs/screenshots/tidy-suite.png) |
+| **Sheets** — spreadsheet with formulas | **Tidy Suite** — home, money and life apps |
+
+*(Screenshots use sample files — your shelf will show your own stuff.)*
+
 ## What you need
 
 - [Node.js](https://nodejs.org) installed on the computer that will host it (the "server").
