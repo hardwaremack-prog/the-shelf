@@ -96,11 +96,24 @@ and how to fix it, rather than failing with a confusing error.
 
 ## Setup (do this once)
 
-**Easiest way:** open the `installer/` folder and double-click the file for your OS —
-`Install (Windows).bat`, `Install (Mac).command`, or `Install (Linux).sh`. It opens a setup
-page in your browser where you can pick an install location and choose whether to start The
-Shelf automatically when your computer starts, then does everything below for you. Skip to
-[Using it](#using-it) once that's done.
+**Easiest way:**
+
+1. On GitHub, click the green **Code** button → **Download ZIP**.
+2. **Extract the zip first** (Windows: right-click it → *Extract All…*). Running the
+   installer from inside the zip doesn't work — Windows only unpacks that one file.
+3. Open the extracted `installer/` folder and double-click the file for your OS —
+   `Install (Windows).bat`, `Install (Mac).command`, or `Install (Linux).sh`.
+   - Windows may show a blue "Windows protected your PC" box for a downloaded `.bat`:
+     click **More info → Run anyway**.
+   - Mac may say the file can't be opened because it's from the internet: right-click it →
+     **Open** → **Open**.
+4. A setup page opens in your browser where you pick an install location and whether to
+   start The Shelf automatically. Click **Install**.
+
+The first install downloads the libraries The Shelf needs (this is what `npm install` does
+in the manual steps below), so **it needs an internet connection** and can take a few
+minutes — longer on a Raspberry Pi. After that it starts the app and gives you the link.
+Skip to [Using it](#using-it) once that's done.
 
 **Manual way**, if you'd rather not use the installer:
 
@@ -483,20 +496,31 @@ What it actually does when you run it:
 2. Copies the app to that location (if you reinstall over an existing install, your own
    files/notes/drawings in `shared/` and `data/` are left untouched — only the app code is
    updated).
-3. If you checked the autostart box, it writes one small OS-native file:
+3. Downloads the libraries the app needs (`npm ci`) into that location if they're not
+   already there. A copy that already includes its `node_modules` folder — handy for an
+   offline Raspberry Pi — skips this step.
+4. If you checked the autostart box, it writes one small OS-native file:
    - **Windows**: `TheShelf.vbs` in your Startup folder
    - **Mac**: `~/Library/LaunchAgents/com.theshelf.app.plist`
    - **Linux**: `~/.config/autostart/theshelf.desktop`
-4. Starts the app right away.
+5. Starts the app right away. Its output is saved to `theshelf.log` in the install folder,
+   and if it stops on startup the setup page shows exactly what it reported.
 
 **To turn off autostart later**, either delete the file above for your OS, or run the
 installer again with the box unchecked — it'll remove it for you.
 
-**If it seems stuck on "Installing…"**: the file-copy step can genuinely take a minute or
-two on Windows if antivirus software scans each file as it's copied — the terminal window
-behind the setup page shows live progress, so check there first. The page itself will also
-update its message after a few seconds, and gives up with a clear error after 4 minutes if
-something is actually stuck rather than just slow.
+**If it seems stuck on "Installing…"**: downloading the libraries and copying files can
+genuinely take a few minutes (antivirus scanning on Windows, a slow SD card on a Pi) — the
+terminal window behind the setup page shows live progress, so check there first. The page
+gives up with a clear error after 15 minutes if something is actually stuck.
+
+**If it says the libraries are missing**: either you're offline (connect and run setup
+again) or npm isn't installed. npm comes with Node.js from nodejs.org; on Raspberry Pi OS /
+Debian, `sudo apt install nodejs` does *not* include it, so also run `sudo apt install npm`.
+
+(Older versions of the installer skipped the library download entirely, so a copy
+downloaded from GitHub installed but never started — the page just said it "couldn't
+confirm it started.")
 
 **If you're re-running the installer to upgrade**: it checks whether an old copy of The
 Shelf is still running on the port it needs, asks it to close, waits until the port is

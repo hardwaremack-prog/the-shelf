@@ -59,6 +59,93 @@ function copyApp(installPath) {
   });
 }
 
+// ---- Libraries (node_modules)
+//
+// The GitHub copy of The Shelf doesn't include node_modules (it's large and
+// rebuilt by npm), so a fresh download has the app code but none of the
+// libraries it needs (express, ws, ...). Before this check existed, the
+// installer copied the files, tried to start the app, and it crashed
+// instantly with "Cannot find module 'express'" -- showing only a vague
+// "couldn't confirm it started" message. A zip that already carries its
+// node_modules (handy for offline Raspberry Pis) skips the download entirely.
+
+function missingDependencies(installPath) {
+  let pkg;
+  try {
+    pkg = JSON.parse(fs.readFileSync(path.join(installPath, 'package.json'), 'utf8'));
+  } catch {
+    return [];
+  }
+  return Object.keys(pkg.dependencies || {}).filter(name =>
+    !fs.existsSync(path.join(installPath, 'node_modules', name, 'package.json'))
+  );
+}
+
+// Runs npm with the same Node that's running this installer whenever npm's
+// own script can be found next to it (avoids PATH and Windows .cmd quirks),
+// otherwise falls back to the plain `npm` command.
+function npmCommand() {
+  const nodeDir = path.dirname(NODE_PATH);
+  const candidates = [
+    path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),          // Windows, nodejs.org Mac pkg layout
+    path.join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'), // Mac/Linux, nodesource
+    '/usr/share/nodejs/npm/bin/npm-cli.js'                                     // Debian / Raspberry Pi OS apt package
+  ];
+  const cli = candidates.find(p => fs.existsSync(p));
+  if (cli) return { cmd: NODE_PATH, args: [cli], shell: false };
+  return { cmd: PLATFORM === 'win32' ? 'npm.cmd' : 'npm', args: [], shell: PLATFORM === 'win32' };
+}
+
+function ensureDependencies(installPath) {
+  return new Promise((resolve) => {
+    const missing = missingDependencies(installPath);
+    if (!missing.length) return resolve({ ok: true, installed: false });
+
+    console.log(`Downloading the libraries The Shelf needs (${missing.join(', ')})...`);
+    console.log('This needs an internet connection and can take a few minutes on a Raspberry Pi.');
+
+    const { cmd, args, shell } = npmCommand();
+    const useCi = fs.existsSync(path.join(installPath, 'package-lock.json'));
+    const npmArgs = [...args, useCi ? 'ci' : 'install', '--omit=dev', '--no-audit', '--no-fund'];
+    let output = '';
+    let child;
+    try {
+      child = spawn(cmd, npmArgs, { cwd: installPath, shell, windowsHide: true });
+    } catch (err) {
+      return resolve({ ok: false, reason: 'npm-missing', detail: err.message });
+    }
+    const collect = (chunk) => {
+      const text = chunk.toString();
+      output = (output + text).slice(-6000);
+      process.stdout.write(text);
+    };
+    child.stdout.on('data', collect);
+    child.stderr.on('data', collect);
+    child.on('error', (err) => {
+      resolve({ ok: false, reason: err.code === 'ENOENT' ? 'npm-missing' : 'deps-failed', detail: err.message });
+    });
+    child.on('close', (code) => {
+      const stillMissing = missingDependencies(installPath);
+      if (code === 0 && !stillMissing.length) {
+        console.log('Libraries downloaded.');
+        return resolve({ ok: true, installed: true });
+      }
+      // `npm` not on PATH via a shell shows up as exit code 127 (Unix) or
+      // "is not recognized" (Windows) rather than ENOENT.
+      const notFound = code === 127 || (/not recognized|not found/i.test(output) && !/npm (ERR|error)/i.test(output));
+      resolve({
+        ok: false,
+        reason: notFound ? 'npm-missing' : 'deps-failed',
+        detail: lastLines(output, 15)
+      });
+    });
+  });
+}
+
+function lastLines(text, n) {
+  return String(text || '').trim().split(/\r?\n/).slice(-n).join('\n');
+}
+
 // ---- Autostart: one implementation per OS, each just writes/removes a
 // small OS-native config file. No registry hacking, no extra dependencies.
 
@@ -242,10 +329,14 @@ async function freePort(port) {
   return false;
 }
 
-function waitForServer(port, timeoutMs) {
+function waitForServer(port, timeoutMs, gaveUp = () => false) {
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
     const attempt = () => {
+      if (gaveUp()) {
+        // Give a crashed app one last check in case it was a quick restart.
+        return checkPort(port).then(state => resolve(state === 'ours'));
+      }
       const req = http.get({ host: '127.0.0.1', port, path: '/api/categories', timeout: 1000, agent: false }, (res) => {
         res.resume();
         resolve(true);
@@ -279,18 +370,26 @@ async function launchServer(installPath) {
       }
     }
 
+    // The app's own output goes to theshelf.log in the install folder, so if
+    // it fails to start we can show the actual error instead of guessing.
+    const logPath = path.join(installPath, 'theshelf.log');
+    let logFd;
+    try { logFd = fs.openSync(logPath, 'w'); } catch { logFd = 'ignore'; }
+
     let child;
+    let exitedEarly = false;
     try {
       child = spawn(NODE_PATH, ['server.js'], {
         cwd: installPath,
         detached: true,
-        stdio: 'ignore'
+        windowsHide: true,
+        stdio: ['ignore', logFd, logFd]
       });
     } catch (spawnErr) {
       // spawn() can throw synchronously for a handful of edge cases, not
       // just emit an async 'error' — cover both so neither can escape.
       console.log('Could not launch the app process:', spawnErr.message);
-      return { started: false, port: APP_PORT, reason: 'start-failed' };
+      return { started: false, port: APP_PORT, reason: 'start-failed', detail: spawnErr.message };
     }
     child.on('error', (err) => {
       // Without this handler, a failed spawn (bad path, permissions, etc.)
@@ -298,19 +397,27 @@ async function launchServer(installPath) {
       // installer process mid-request — which is exactly what caused the
       // "Failed to fetch" bug. Logging it here keeps the installer alive so
       // it can report the failure properly instead.
+      exitedEarly = true;
       console.log('Could not launch the app process:', err.message);
     });
+    child.on('exit', () => { exitedEarly = true; });
     child.unref();
+    if (typeof logFd === 'number') { try { fs.closeSync(logFd); } catch { /* fine */ } }
 
     // Generous: a Raspberry Pi reading freshly copied files off an SD card
-    // can take well over 8 seconds to start the first time.
-    const started = await waitForServer(APP_PORT, 30000);
-    return { started, port: APP_PORT, reason: started ? null : 'start-failed' };
+    // can take well over 8 seconds to start the first time. Stops waiting
+    // straight away if the app has already crashed.
+    const started = await waitForServer(APP_PORT, 30000, () => exitedEarly);
+    if (started) return { started, port: APP_PORT, reason: null };
+    let detail = '';
+    try { detail = lastLines(fs.readFileSync(logPath, 'utf8'), 15); } catch { /* no log */ }
+    if (detail) console.log('The app reported:\n' + detail);
+    return { started: false, port: APP_PORT, reason: 'start-failed', detail };
   } catch (err) {
     // Last-resort net: whatever went wrong, report it as a normal failed
     // result instead of letting it escape as a rejected promise.
     console.log('Unexpected error while starting the app:', err.message);
-    return { started: false, port: APP_PORT, reason: 'start-failed' };
+    return { started: false, port: APP_PORT, reason: 'start-failed', detail: err.message };
   }
 }
 
@@ -326,7 +433,7 @@ function openBrowser(url) {
 }
 
 module.exports = {
-  defaultInstallPath, copyApp, setAutostart, launchServer,
+  defaultInstallPath, copyApp, setAutostart, launchServer, ensureDependencies, missingDependencies,
   vbsLauncherContent, plistContent, desktopEntryContent
 };
 
@@ -355,6 +462,18 @@ if (require.main === module) {
           copyApp(finalPath);
           console.log('Files copied.');
 
+          const deps = await ensureDependencies(finalPath);
+          if (!deps.ok) {
+            console.log(`Could not get the libraries (reason: ${deps.reason}).`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              ok: true, installPath: finalPath, serverStarted: false,
+              appPort: APP_PORT, reason: deps.reason, detail: deps.detail || ''
+            }));
+            setTimeout(() => process.exit(1), 1500);
+            return;
+          }
+
           setAutostart(finalPath, !!autostart);
           console.log('Checking for a previous version and starting the app...');
           const launch = await launchServer(finalPath);
@@ -366,7 +485,8 @@ if (require.main === module) {
             installPath: finalPath,
             serverStarted: launch.started,
             appPort: launch.port,
-            reason: launch.reason
+            reason: launch.reason,
+            detail: launch.detail || ''
           }));
           setTimeout(() => process.exit(0), 1500);
         } catch (err) {

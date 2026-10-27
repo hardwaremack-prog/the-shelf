@@ -122,15 +122,16 @@ document.getElementById('installBtn').addEventListener('click', async () => {
   const installPath = document.getElementById('installPath').value;
   const autostart = document.getElementById('autostart').checked;
 
-  // Copying node_modules can be genuinely slow on Windows if antivirus
-  // scans each file — update the message so a slow install doesn't look
-  // like a frozen one, and give up with a clear message if it truly hangs.
+  // A first install downloads the app's libraries, and copying files can be
+  // slow on Windows if antivirus scans each one — update the message so a
+  // slow install doesn't look like a frozen one, and give up with a clear
+  // message only if it truly hangs.
   const slowNotice = setTimeout(() => {
-    status.textContent = 'Still working\u2026 this can take a couple of minutes on Windows if antivirus software is scanning the files. The terminal window behind this page shows live progress.';
+    status.textContent = 'Still working\u2026 the first install downloads the libraries The Shelf needs, which can take a few minutes (longer on a Raspberry Pi or a slow connection). The terminal window behind this page shows live progress.';
   }, 8000);
 
   const controller = new AbortController();
-  const hardTimeout = setTimeout(() => controller.abort(), 4 * 60 * 1000);
+  const hardTimeout = setTimeout(() => controller.abort(), 15 * 60 * 1000);
 
   try {
     const res = await fetch('/do-install', {
@@ -159,16 +160,25 @@ document.getElementById('installBtn').addEventListener('click', async () => {
         </div>
       `;
     } else {
-      const reasonText = data.reason === 'old-still-running'
-        ? `The files were updated, but an older copy of The Shelf is still running and this setup wasn't allowed to stop it &mdash; usually because it was started as a system service (for example with systemd and sudo). Stop that copy (for example <code>sudo systemctl restart theshelf</code> if that's how you set it up), or restart this computer, and the new version will run.`
-        : data.reason === 'port-taken-by-other'
-        ? `Something else on this computer is already using port ${data.appPort} — The Shelf couldn't start there. Close whatever that is (or set a different PORT), then try installing again.`
-        : `The files were installed, but The Shelf didn't respond after starting — it may need a moment, or may have hit an error. Try opening the link below in a few seconds; if that doesn't work, restart this computer and try installing again.`;
+      const reasons = {
+        'old-still-running': `The files were updated, but an older copy of The Shelf is still running and this setup wasn't allowed to stop it &mdash; usually because it was started as a system service (for example with systemd and sudo). Stop that copy (for example <code>sudo systemctl restart theshelf</code> if that's how you set it up), or restart this computer, and the new version will run.`,
+        'port-taken-by-other': `Something else on this computer is already using port ${data.appPort} — The Shelf couldn't start there. Close whatever that is (or set a different PORT), then try installing again.`,
+        'npm-missing': `The files were copied, but The Shelf also needs a few libraries downloaded with <b>npm</b>, and npm isn't installed on this computer. On Windows and Mac, reinstall Node.js from <a href="https://nodejs.org" target="_blank">nodejs.org</a> (npm comes with it). On Linux / Raspberry Pi, run <code>sudo apt install npm</code>. Then run this setup again.`,
+        'deps-failed': `The files were copied, but downloading the libraries The Shelf needs didn't finish. This step needs an internet connection — check you're online and run this setup again. If it keeps failing, the details below say why.`,
+        'start-failed': `The files were installed, but The Shelf stopped as soon as it started. The details below are what it reported. A copy is also saved as <code>theshelf.log</code> in the install folder.`
+      };
+      const reasonText = reasons[data.reason] || reasons['start-failed'];
+      const esc = (t) => String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+      const detailHtml = data.detail
+        ? `<pre style="white-space:pre-wrap; font-size:12px; max-height:220px; overflow:auto; background:rgba(127,127,127,.12); padding:10px; border-radius:6px;">${esc(data.detail)}</pre>`
+        : '';
+      const showLink = !['npm-missing', 'deps-failed'].includes(data.reason);
       document.getElementById('form').innerHTML = `
         <div class="success-box">
-          <p class="status error">Installed to ${data.installPath}, but couldn't confirm it started.</p>
+          <p class="status error">${showLink ? `Installed to ${data.installPath}, but couldn't confirm it started.` : `Not finished: The Shelf's libraries are missing.`}</p>
           <p>${reasonText}</p>
-          <p><a href="${appUrl}" target="_blank">${appUrl}</a></p>
+          ${detailHtml}
+          ${showLink ? `<p><a href="${appUrl}" target="_blank">${appUrl}</a></p>` : ''}
         </div>
       `;
     }
@@ -177,7 +187,7 @@ document.getElementById('installBtn').addEventListener('click', async () => {
     clearTimeout(hardTimeout);
     status.className = 'status error';
     status.textContent = err.name === 'AbortError'
-      ? 'This is taking far longer than expected (over 4 minutes) — something is likely stuck. Check the terminal window behind this page for an error, then close it and try again.'
+      ? 'This is taking far longer than expected (over 15 minutes) — something is likely stuck. Check the terminal window behind this page for an error, then close it and try again.'
       : err.message;
     btn.disabled = false;
   }
