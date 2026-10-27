@@ -1,21 +1,46 @@
 # The Shelf
 
-A little self-hosted hub for your home network. Run it on one computer, and anyone on the
-same Wi-Fi/network can open it in a browser to look at pictures (with a built-in slideshow),
-listen to music, watch videos, download a game or program, use the built-in notes, drawing
-pad, word processor, spreadsheet, and quick-slides tools, message other people on the
-network who are running it too, and chat with a small AI assistant that runs entirely on
-your own computer — plus a home dashboard with a bulletin board (paste images or video
-straight onto it) and quick links.
+### Your whole house, on one shelf.
 
-No accounts, no cloud, no internet required for any of that — everything stays on your
-network, including the AI tab (it downloads a small model once, then runs fully offline).
-(The one exception is the optional weather reading on the Home tab, which needs this
-computer to have internet access — see below.)
+**The Shelf turns any computer — even a little Raspberry Pi — into a private home cloud that
+everyone on your Wi-Fi can open in a browser.** Photos, music, movies, games, books, an office
+suite, a family message board, a house-wide chat app, remote desktop, and an AI assistant —
+all in one place, all on your own network, all free.
+
+No accounts. No subscriptions. No ads. Nothing uploaded anywhere. Install it once, and every
+phone, laptop, tablet and TV in the house can use it.
+
+![The Shelf](docs/screenshots/pictures.png)
+
+## Why people love it
+
+- 🖼️ **Your photos, finally in one place** — a fast photo grid with a full-screen slideshow
+  that plays your own music in the background. Put it on the TV and let it run.
+- 🎵 **Your own music service, minus the monthly bill** — album art, shuffle, play counts, "most played,"
+  and a live music visualizer with six styles you can blow up to full screen.
+- 🎬 **Movies and videos** — click and watch from any device in the house.
+- 🎮 **A game shelf** — browser games play instantly; programs and installers are one
+  click to download onto any computer.
+- 📚 **A home library** — read PDFs, manuals and ebooks right in the browser.
+- 📝 **A full office, built in** — Notes, Docs (word processor), Sheets (with formulas),
+  Slides and a Draw pad. No Office license, no Google account.
+- 🏠 **A family home screen** — a bulletin board you can paste pictures and videos straight
+  onto, quick links, and the local weather.
+- 💬 **Every Shelf finds every other Shelf** — put it on a few computers and they discover
+  each other by themselves. Instant house-wide chat with picture sharing, with zero setup.
+- 🖥️ **Help from the other room** — click someone's computer to open their Shelf or take
+  over their desktop (VNC) right in your browser, even from your phone.
+- 🤖 **A private AI assistant with one switch** — The Shelf checks your hardware, picks a
+  model that fits, downloads it once, and then it runs completely offline. No API key,
+  no monthly fee, and nothing you type ever leaves your house.
+- 🧹 **Tidy Suite** — a collection of little home, money and life-organizing apps, included.
+- 🔒 **Yours, and only yours** — optional accounts and access control, one-click backup
+  and restore, and everything stays on your network.
+
+**Runs on** Windows, Mac, Linux and Raspberry Pi (including the Pi 400 and Pi 500).
+**Works from** any device with a web browser. **Installs** with a double-click.
 
 ## Screenshots
-
-![The Shelf — Pictures shelf](docs/screenshots/pictures.png)
 
 ### Every Shelf finds every other Shelf
 
