@@ -1,19 +1,26 @@
 # The Shelf
 
-### Your whole house, on one shelf.
+### Like SharePoint for your home — private, local, and on every device.
 
-**The Shelf turns any computer — even a little Raspberry Pi — into a private home cloud that
-everyone on your Wi-Fi can open in a browser.** Photos, music, movies, games, books, an office
-suite, a family message board, a house-wide chat app, remote desktop, and an AI assistant —
-all in one place, all on your own network, all free.
+**The Shelf is your family's own intranet.** Install it on one computer — Windows, Mac,
+Linux or a Raspberry Pi — and everyone on your home network gets a shared hub in their
+browser: the family photos, music and movies, games and programs, books and manuals, shared
+documents and spreadsheets, a bulletin board, house-wide chat, remote desktop, and an AI
+assistant.
 
-No accounts. No subscriptions. No ads. Nothing uploaded anywhere. Install it once, and every
-phone, laptop, tablet and TV in the house can use it.
+It all runs **on your local network, not the internet.** No accounts to sign up for, no
+subscriptions, no ads, and nothing uploaded anywhere — your files never leave your house.
+
+| 🖥️ Runs on | 📱 Works from | 🌐 Lives on | ⚡ Installs |
+|:---:|:---:|:---:|:---:|
+| Windows · Mac · Linux · Raspberry Pi | Any phone, tablet, laptop or TV with a browser | Your own Wi-Fi / LAN — no cloud | With a double-click |
 
 ![The Shelf](docs/screenshots/pictures.png)
 
 ## Why people love it
 
+- 🗂️ **One shared place for the whole family** — like a company SharePoint, but for home:
+  drop a file on a shelf and every device in the house can open it.
 - 🖼️ **Your photos, finally in one place** — a fast photo grid with a full-screen slideshow
   that plays your own music in the background. Put it on the TV and let it run.
 - 🎵 **Your own music service, minus the monthly bill** — album art, shuffle, play counts, "most played,"
@@ -37,8 +44,8 @@ phone, laptop, tablet and TV in the house can use it.
 - 🔒 **Yours, and only yours** — optional accounts and access control, one-click backup
   and restore, and everything stays on your network.
 
-**Runs on** Windows, Mac, Linux and Raspberry Pi (including the Pi 400 and Pi 500).
-**Works from** any device with a web browser. **Installs** with a double-click.
+**Mix and match:** run a Shelf on the Pi in the den, the office PC and the kids' laptops —
+they find each other automatically and work together as one home network.
 
 ## Screenshots
 
