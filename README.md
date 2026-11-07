@@ -17,7 +17,7 @@ subscriptions, no ads, and nothing uploaded anywhere — your files never leave 
 
 ![The Shelf](docs/screenshots/pictures.png)
 
-**👉 [Take the interactive tour](https://hardwaremack-prog.github.io/the-shelf/the-shelf-tour.html)** — click around a mock-up of The Shelf and hover anything to see what it does.
+**👉 [Take the interactive tour](https://raw.githack.com/hardwaremack-prog/the-shelf/main/docs/the-shelf-tour.html)** — click around a mock-up of The Shelf and hover anything to see what it does.
 
 ## Why people love it
 
