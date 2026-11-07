@@ -17,6 +17,8 @@ subscriptions, no ads, and nothing uploaded anywhere — your files never leave 
 
 ![The Shelf](docs/screenshots/pictures.png)
 
+**👉 [Take the interactive tour](https://hardwaremack-prog.github.io/the-shelf/the-shelf-tour.html)** — click around a mock-up of The Shelf and hover anything to see what it does.
+
 ## Why people love it
 
 - 🗂️ **One shared place for the whole family** — like a company SharePoint, but for home:

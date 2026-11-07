@@ -1,4 +1,10 @@
-<title>The Shelf Tour</title>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Shelf &mdash; Interactive Tour</title>
+<meta name="description" content="A hover-to-explore tour of The Shelf, a self-hosted home network hub: photos, music, videos, games, office tools, chat, remote desktop and a private AI.">
 <style>
 /* ---------- design plan ----------
    Color: recreates The Shelf's own dark plum/ink palette (--ink, --surface,
@@ -142,43 +148,55 @@ header.topbar p{margin:3px 0 0; font-size:13px; color:var(--text-muted);}
 .progress-fill{position:absolute; inset:0 auto 0 0; width:62%; background:var(--mint); opacity:.3;}
 .progress-shell span{position:relative; z-index:1; display:flex; align-items:center; height:100%; padding:0 10px; font-size:12px;}
 
+.gh-link{display:inline-flex; align-items:center; gap:8px; background:var(--accent); color:var(--accent-ink); text-decoration:none; font-weight:700; font-size:13px; padding:8px 14px; border-radius:8px;}
+.gh-link:hover{filter:brightness(1.08);}
+.gh-link.ghost{background:none; color:var(--text); border:1px solid var(--divider); font-weight:600;}
+.top-actions{display:flex; gap:8px; flex-wrap:wrap;}
+.new-badge{font-size:9.5px; font-weight:700; letter-spacing:.06em; background:var(--mint); color:#10301d; border-radius:4px; padding:1px 5px; margin-left:auto;}
+.hint{font-size:12px; color:var(--text-muted); margin:0 0 14px;}
+.btn-row{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;}
+.input-mock{background:var(--ink-deep); border:1px solid var(--divider); border-radius:6px; padding:7px 10px; font-size:12.5px; color:var(--text-muted); min-width:180px;}
+.badge{font-size:10.5px; border-radius:4px; padding:2px 6px; background:var(--mint); color:#10301d; font-weight:700;}
+.menu-pop{background:var(--surface-hi); border:1px solid var(--divider); border-radius:10px; padding:6px; display:inline-flex; flex-direction:column; gap:2px; min-width:240px;}
+.menu-pop div{padding:8px 10px; border-radius:6px; font-size:13px;}
+.menu-pop div small{display:block; color:var(--text-muted); font-size:11.5px;}
+.menu-pop div:hover{background:var(--surface);}
 @media (max-width:820px){
   .app{flex-direction:column;}
   .sidebar{width:auto; flex-direction:row; flex-wrap:wrap; align-items:flex-start;}
   .brand{width:100%;}
   .toggle-group, .shelf-nav, .tool-nav{flex:1; min-width:160px;}
   .sidebar-foot{width:100%; margin-top:6px;}
+  .tip-r::after, .tip-r.hot:hover::after, .tip-r.hot:focus-visible::after, .tip-r.hot.show::after{left:0; top:calc(100% + 8px); transform:none; max-width:min(260px,80vw);}
+  .tip-r::before{display:none;}
+  .tip-t::after{max-width:min(230px,80vw);}
+  html,body{overflow-x:hidden;} .app{overflow-x:clip;}
 }
 </style>
-
+</head>
+<body>
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">&#9724;&#9723;</div>
       <div>
         <h1>The Shelf</h1>
-        <p>your network's stuff, in one place</p>
+        <p>like SharePoint for your home</p>
       </div>
     </div>
 
     <div class="toggle-group">
-      <div class="toggle-row hot tip-r underline" data-tip="The master switch. Off, and everyone on the network sees a simple 'turned off' page instead of your shelves &mdash; the app itself keeps running quietly, so switching it back on is instant.">
+      <div class="toggle-row hot tip-r underline" data-tip="The master switch. Off, and everyone on the network sees a simple 'turned off' page instead of your shelves &mdash; the app keeps running quietly, so switching it back on is instant. It's remembered across restarts.">
         <div class="switch on"></div><span class="lbl">The Shelf is on</span>
       </div>
-      <div class="toggle-row hot tip-r underline" data-tip="On, and nothing but this exact computer can reach The Shelf at all &mdash; a hard network-level lockout, separate from the read/write settings below it.">
+      <div class="toggle-row hot tip-r underline" data-tip="On, and nothing but this exact computer can reach The Shelf at all &mdash; everyone else on the network is turned away.">
         <div class="switch"></div><span class="lbl">Local computer only</span>
       </div>
-      <div class="toggle-row hot tip-r underline" data-tip="Off (the default): anyone on the network can browse, but only this machine can make changes. On ('Secured visitors'): even browsing needs a login. Either way, only this computer can flip this switch.">
-        <div class="switch"></div><span class="lbl">Anonymous read only</span>
+      <div class="toggle-row hot tip-r underline" data-tip="Off (the default): anyone on the network can browse, but only this machine can make changes. On ('Secured visitors'): even browsing needs a login. The gear icon next to it sets up named accounts &mdash; each one 'Can make changes' or 'Read only'. Only the host computer sees these switches.">
+        <div class="switch"></div><span class="lbl">Anonymous read only &nbsp;&#9881;</span>
       </div>
       <div class="toggle-row hot tip-r underline" data-tip="A quick-allow switch: on, and anyone on the network can add, edit, or delete things &mdash; and use the AI tab &mdash; without logging in at all.">
         <div class="switch"></div><span class="lbl">Anyone can edit + AI</span>
-      </div>
-    </div>
-
-    <div>
-      <div class="shelf-item hot tip-r underline active" id="homeNav" data-tip="A quick dashboard &mdash; recently added files across every shelf, plus who's currently connected.">
-        <span>&#8962;&nbsp; Home</span>
       </div>
     </div>
 
@@ -192,7 +210,11 @@ header.topbar p{margin:3px 0 0; font-size:13px; color:var(--text-muted);}
       <div class="tool-nav" id="toolNav"></div>
     </div>
 
-    <div class="sidebar-foot hot tip-r" data-tip="The address anyone else on your Wi-Fi types in to reach this same Shelf from their own phone or laptop &mdash; shown live once the real app is running.">
+    <div class="shelf-item hot tip-r underline" data-tip="Opens a panel to pick a shelf and drag files in. You can also drag files from your desktop straight onto any shelf in the sidebar &mdash; or drag a card onto a different shelf to move it.">
+      <span>&#65291;&nbsp; Add something</span>
+    </div>
+
+    <div class="sidebar-foot hot tip-r" data-tip="The address anyone else on your Wi-Fi types in to reach this same Shelf from their own phone, laptop or TV &mdash; shown live once the real app is running.">
       On your network: 192.168.1.42:8080
     </div>
   </aside>
@@ -201,7 +223,11 @@ header.topbar p{margin:3px 0 0; font-size:13px; color:var(--text-muted);}
     <header class="topbar">
       <div>
         <h2 id="secTitle">Home</h2>
-        <p id="secSub">A quick dashboard for whoever's running this Shelf</p>
+        <p id="secSub"></p>
+      </div>
+      <div class="top-actions">
+        <a class="gh-link" href="https://github.com/hardwaremack-prog/the-shelf" target="_blank" rel="noopener">Get The Shelf on GitHub &rarr;</a>
+        <a class="gh-link ghost" href="https://github.com/hardwaremack-prog/the-shelf/raw/main/docs/the-shelf-manual.pdf" target="_blank" rel="noopener">Manual (PDF)</a>
       </div>
     </header>
     <section class="content" id="content"></section>
@@ -209,173 +235,175 @@ header.topbar p{margin:3px 0 0; font-size:13px; color:var(--text-muted);}
 </div>
 
 <script>
+// This is a guided tour: hover (or tap) anything with a dotted underline to see what it does.
 const SHELVES = [
-  {key:'Pictures', color:'var(--cat-pictures)', tip:"Photos, shown as a grid. Click one for a full-screen view, or start a slideshow with a slow Ken Burns pan &mdash; there's also a built-in editor for rotate/flip/brightness right from the grid."},
-  {key:'Music', color:'var(--cat-music)', tip:"A mini player with a live visualizer follows you around the app. 'Get album art' looks up real cover art automatically and saves it straight into the file's own tag, not just The Shelf's cache."},
-  {key:'Videos', color:'var(--cat-videos)', tip:"Click to play in a small floating player that keeps going while you browse elsewhere. 'Get thumbnails' grabs a real frame from each video, done entirely in your browser."},
-  {key:'Games', color:'var(--cat-games)', tip:"Single-file or zipped HTML5 games get a Play button &mdash; runs right in a browser tab, no download or install needed."},
-  {key:'Programs', color:'var(--cat-programs)', tip:"Anything downloadable, tracked by download count instead of plays &mdash; the closest signal The Shelf has for 'did anyone actually use this.'"},
-  {key:'Books / PDFs', color:'var(--cat-books)', tip:"Manuals, ebooks, scanned docs &mdash; opens in the browser's own built-in PDF viewer, no extra software needed."},
+  {key:'Pictures', color:'var(--cat-pictures)', tip:"Photos as a grid. Full-screen viewer, a slideshow with Ken Burns pan/zoom and your music playing behind it, a built-in photo editor, and 'Create with AI' to draw new pictures from a description."},
+  {key:'Music', color:'var(--cat-music)', tip:"Your own music service: shuffle play, real album art, a tag editor, play counts, 'Most played' and 'Recently added' sorts, and a mini player with a six-style fullscreen visualizer."},
+  {key:'Videos', color:'var(--cat-videos)', tip:"Click to play in a small floating player that keeps going while you browse. 'Get thumbnails' grabs a real frame from each video, right in your browser. Auto-plays the next one."},
+  {key:'Games', color:'var(--cat-games)', tip:"Single-file or zipped HTML5 games get a Play button &mdash; runs right in a browser tab, no download or install needed. Drop a picture on a card to give it cover art."},
+  {key:'Programs', color:'var(--cat-programs)', tip:"Installers and downloads for any computer in the house, tracked by download count &mdash; the closest signal for 'did anyone actually use this.'"},
+  {key:'Books / PDFs', color:'var(--cat-books)', tip:"Manuals, ebooks, scanned docs. Covers are made automatically from each PDF's first page, and Read opens it in the browser's own PDF viewer."},
 ];
 const TOOLS = [
+  {key:'Home', tip:"The family home screen: bulletin board (paste pictures and videos right on it), quick links, weather, affirmation and color of the day, shelf counts, and Backup & restore."},
   {key:'Notes', tip:"A simple list of notes with a title and body. Paste an image (Ctrl+V) straight into one and it's attached as a thumbnail."},
-  {key:'Draw', tip:"A tabbed drawing pad &mdash; pen, shapes, text, an eraser, and a Copy button that puts your drawing straight on the clipboard to paste anywhere else."},
-  {key:'Docs', tip:"A basic word processor: bold/italic/underline, headings, lists &mdash; saves automatically as you type."},
-  {key:'Sheets', tip:"A mini spreadsheet with real formulas (=SUM, =AVERAGE, plain math) and CSV/Excel import."},
-  {key:'Slides', tip:"Build a quick heading + body deck, then Present it full-screen with arrow-key navigation."},
-  {key:'Messages', tip:"Finds other computers running The Shelf on the same Wi-Fi automatically &mdash; no accounts, no setup &mdash; and lets you chat directly, computer to computer."},
+  {key:'Draw', tip:"A tabbed drawing pad &mdash; pen, shapes, text, eraser, undo, paste-in images, and a Copy button that puts your drawing on the clipboard."},
+  {key:'Docs', tip:"A basic word processor: bold/italic/underline, headings, lists, text size, pasted images &mdash; saves as you type."},
+  {key:'Sheets', tip:"A mini spreadsheet with real formulas (=SUM, =AVERAGE, plain math). Drag in a CSV, Excel or ODS file to import it."},
+  {key:'Slides', tip:"Build a quick heading + body deck (with pasted pictures), then Present it full-screen with arrow-key navigation."},
+  {key:'Messages', tip:"Every Shelf on your Wi-Fi finds every other one by itself. Chat with picture sharing, open someone's whole Shelf, or take over their desktop with VNC &mdash; right in the browser."},
   {key:'Visitors', tip:"A plain log of every device that's opened this Shelf &mdash; name or IP, first seen, last seen."},
-  {key:'Big Transfer', tip:"A dedicated spot for genuinely large files &mdash; 15 to 25GB and up. Uploads go in chunks, so a dropped connection only costs the current chunk, and dropping the same file back in later resumes instead of restarting."},
-  {key:'AI', tip:"A small language model that runs entirely on this computer &mdash; no account, no API key, no internet needed once it's downloaded once."},
+  {key:'Big Transfer', tip:"A dedicated spot for genuinely large files &mdash; 15 to 25GB and up. Uploads go in chunks and resume if the connection drops."},
+  {key:'AI', tip:"A private chat assistant with one switch. The Shelf checks your hardware, recommends a model that fits, downloads it once, and then it runs fully offline."},
+  {key:'Tidy Suite', isNew:true, tip:"14 little home, money and life apps built in &mdash; spreadsheets, writing, bills & debt, meals, chores & allowance, home inventory, job hunt and more."},
 ];
-
-const homeNav = document.getElementById('homeNav');
-homeNav.addEventListener('click', ()=>{
-  document.querySelectorAll('.shelf-item.active').forEach(x=>x.classList.remove('active'));
-  homeNav.classList.add('active');
-  render('Home');
-});
-
-const shelfNav = document.getElementById('shelfNav');
-SHELVES.forEach((s,i)=>{
-  const d = document.createElement('div');
-  d.className = 'shelf-item hot tip-r underline' + (i===0?'':'');
-  d.dataset.tip = s.tip;
-  d.innerHTML = `<span class="swatch" style="--cat-color:${s.color}"></span><span>${s.key}</span>`;
-  d.addEventListener('click', ()=>selectSection(s.key, d, shelfNav));
-  shelfNav.appendChild(d);
-});
-const toolNav = document.getElementById('toolNav');
-TOOLS.forEach(t=>{
-  const d = document.createElement('div');
-  d.className = 'shelf-item hot tip-r underline';
-  d.dataset.tip = t.tip;
-  d.innerHTML = `<span>${t.key}</span>`;
-  d.addEventListener('click', ()=>selectSection(t.key, d, toolNav));
-  toolNav.appendChild(d);
-});
-
-function selectSection(key, el, group){
-  document.querySelectorAll('.shelf-item.active').forEach(x=>x.classList.remove('active'));
-  el.classList.add('active');
-  render(key);
-}
 
 const SECTIONS = {
   'Home': {
-    sub: "A quick dashboard for whoever's running this Shelf",
+    sub: "The family home screen &mdash; hover anything with a dotted underline",
     html: `
+      <p class="hint">This is a guided tour of The Shelf. Click any shelf or tool on the left, and hover (or tap) anything underlined to see what it does.</p>
       <div class="dashboard-grid">
-        <div class="tile hot tip-t" data-tip="A new one picked automatically every day from a set of about 110 &mdash; nothing to write or maintain.">
+        <div class="tile hot tip-t underline" data-tip="A new one picked automatically every day from about 110 &mdash; works offline, nothing to maintain.">
           <h3>Today's affirmation</h3>
           <p style="margin:0; font-size:13px; color:var(--text-muted);">"Small, steady progress still counts as progress."</p>
         </div>
-        <div class="tile hot tip-t" data-tip="Cycles daily along with what the color means &mdash; purely decorative, but a nice bit of daily texture.">
+        <div class="tile hot tip-t underline" data-tip="One of about 90 colors, cycling daily along with what the color means &mdash; a little bit of daily texture.">
           <h3>Color of the day</h3>
           <div style="display:flex; align-items:center; gap:10px;"><div style="width:28px;height:28px;border-radius:6px;background:#7AA8F2;"></div><span style="font-size:13px; color:var(--text-muted);">Denim &mdash; calm and dependable</span></div>
         </div>
-        <div class="tile hot tip-t" data-tip="The one part of The Shelf that ever needs internet &mdash; a quick, no-account lookup for wherever you're browsing from. Skip it and everything else works exactly the same.">
+        <div class="tile hot tip-t underline" data-tip="The one part of The Shelf that ever needs internet &mdash; a free, no-account lookup for wherever you're browsing from. Say no to location and everything else works the same.">
           <h3>Weather</h3>
           <p style="margin:0; font-size:22px;">64&deg;F <span style="font-size:13px; color:var(--text-muted);">Partly cloudy</span></p>
         </div>
-        <div class="tile hot tip-t" data-tip="A single .zip with everything &mdash; files, notes, drawings, sheets, messages. Import it on a fresh install to bring it all back.">
+        <div class="tile hot tip-t underline" data-tip="Export makes one .zip &mdash; and now you pick exactly what goes in it (files, notes, drawings, sheets, slides, messages) with the size shown. Import it on a fresh install to bring it all back.">
           <h3>Backup &amp; restore</h3>
           <div style="display:flex; gap:8px;"><button class="pill-btn">Export a backup</button><button class="pill-btn ghost">Import a backup</button></div>
         </div>
       </div>
-      <div class="tile hot tip-t" style="margin-top:16px;" data-tip="Paste an image or a short clip (Ctrl+V) anywhere on this tab and it pins straight to the board as its own note.">
-        <h3>Bulletin board</h3>
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <div class="sticky" style="background:#F2B441; width:120px;">Pick up more filament for the printer</div>
-          <div class="sticky" style="background:#6FCF97; width:120px;">Router admin: 192.168.1.1</div>
-          <div class="sticky" style="background:#E091B3; width:120px;">Grandma's recipe box &mdash; scan this weekend</div>
+      <div class="dashboard-grid" style="margin-top:16px;">
+        <div class="tile hot tip-t underline" data-tip="Paste an image or a short video (Ctrl+V) anywhere on Home and it pins straight to the board. Hover a note to read it all; double-click to open it full size.">
+          <h3>Bulletin board</h3>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <div class="sticky" style="background:#F2B441; width:120px;">Pick up more filament for the printer</div>
+            <div class="sticky" style="background:#6FCF97; width:120px;">Movie night Friday &mdash; your pick</div>
+            <div class="sticky" style="background:#E091B3; width:120px;">Grandma's recipe box &mdash; scan this weekend</div>
+          </div>
+        </div>
+        <div class="tile hot tip-t underline" data-tip="Bookmarks for the whole house &mdash; the router's admin page, the printer, school sites.">
+          <h3>Quick links</h3>
+          <div class="row-list">
+            <div class="row">Router admin <span class="meta">192.168.1.1</span></div>
+            <div class="row">Printer <span class="meta">192.168.1.30</span></div>
+          </div>
         </div>
       </div>`
   },
   'Pictures': {
-    sub: 'A photo grid with a built-in slideshow and editor',
+    sub: 'A photo grid with a slideshow, an editor, and AI pictures',
     html: `
-      <div style="margin-bottom:12px;"><button class="pill-btn hot tip-b" data-tip="Auto-advances through the grid with a slow Ken Burns pan/zoom; arrow keys skip, Esc closes. If Music has anything in it, the slideshow quietly starts it as background audio too.">Start slideshow</button></div>
+      <div class="btn-row">
+        <button class="pill-btn hot tip-b underline" data-tip="Auto-advances with a slow Ken Burns pan/zoom (or turn that off). If Music has songs, it shuffles them in the background, with volume and skip right in the slideshow. Real browser fullscreen &mdash; great on a TV.">Start slideshow</button>
+        <button class="pill-btn hot tip-b underline" data-tip="Describe a picture and Pollinations.ai draws it &mdash; square, wide or tall. Like it? 'Yes, add to Pictures.' Not quite? 'No, try another.'">Create with AI</button>
+        <button class="pill-btn ghost hot tip-b underline" data-tip="Download the whole shelf as one .zip, or just a list of it as an Excel spreadsheet. Every shelf has this.">Export&hellip;</button>
+        <button class="pill-btn ghost hot tip-b underline" data-tip="Compares each file's actual contents, not names, then keeps the plainest name and removes the copies &mdash; after asking you first.">Remove duplicates</button>
+      </div>
+      <div class="btn-row">
+        <span class="input-mock hot tip-b underline" data-tip="Every shelf has a filter box, plus sort options like Most played and play-count filters.">Filter by name&hellip;</span>
+      </div>
       <div class="grid-cards">
         ${['#F2B441','#E091B3','#7AA8F2','#B98FE8','#6FCF97','#E2725B'].map((c,i)=>`
           <div class="card">
             <div class="thumb" style="background:${c};">IMG</div>
             <div class="name">beach_trip_0${i+1}.jpg</div>
-            <div class="meta hot tip-t" data-tip="The pencil icon opens a real editor: rotate, flip, and brightness/contrast/saturation &mdash; Save overwrites the original, Save as copy keeps it untouched.">&#9998; edit</div>
+            ${i===0 ? `<div class="meta hot tip-t underline" data-tip="Pencil: rotate, flip, brightness/contrast/saturation &mdash; Save overwrites, Save as copy keeps the original. Tag icon: rename. 'Move to&hellip;' sends it to another shelf (or just drag it in the sidebar).">&#9998; edit &middot; rename &middot; move</div>` : `<div class="meta">&#9998; edit &middot; rename &middot; move</div>`}
           </div>
         `).join('')}
       </div>`
   },
   'Music': {
-    sub: 'Plays right in the browser, with real cover art',
+    sub: 'Your own music service, minus the monthly bill',
     html: `
-      <div class="row-list">
-        ${[['Night Drive','The Analog Kids','3:42'],['Coastline','Reverie','4:05'],['Paper Boats','The Analog Kids','2:58']].map(([t,a,d])=>`
-          <div class="row"><span>&#9654;</span><div><div style="font-weight:600;">${t}</div><div class="meta" style="margin:0;">${a}</div></div><span class="meta">${d}</span></div>
-        `).join('')}
+      <div class="btn-row">
+        <button class="pill-btn hot tip-b underline" data-tip="Turns shuffle on and starts from a random song. The mini player has its own shuffle button too.">Shuffle play</button>
+        <button class="pill-btn ghost hot tip-b underline" data-tip="Looks up real cover art from Apple's iTunes catalog and saves it into the file's own tag &mdash; MP3, WAV, OGG, FLAC, M4A, AAC. Only fills in what's missing.">Get album art</button>
+        <button class="pill-btn ghost hot tip-b underline" data-tip="Turns messy downloaded names like 'YTDown.com_YouTube_Song-Name_abc123_1080p.mp3' into just 'Song Name.mp3'. Safe to run any time.">Standardize names</button>
+        <button class="pill-btn ghost hot tip-b underline" data-tip="The complete library as one .zip, or a song list spreadsheet (names, artists, plays, sizes, dates).">Export&hellip;</button>
       </div>
-      <div class="tile hot tip-t" style="margin-top:14px;" data-tip="Searches Apple's iTunes catalog by artist/title (or filename if a track has no tags) and embeds real cover art directly into the file &mdash; MP3, WAV, OGG, FLAC, M4A, AAC all supported.">
-        <button class="pill-btn">Get album art</button>
+      <div class="btn-row">
+        <span class="input-mock">Filter by name&hellip;</span>
+        <span class="input-mock hot tip-b underline" data-tip="Sort by Most played, Artist (A&ndash;Z), or Recently added &mdash; or filter to songs played never / 1+ / 5+ / 10+ / 25+ times.">Most played &#9662;</span>
+      </div>
+      <div class="row-list">
+        ${[['Night Drive','The Analog Kids','42 plays'],['Coastline','Reverie','17 plays'],['Paper Boats','The Analog Kids','9 plays']].map(([t,a,d],i)=>`
+          <div class="row"><span>&#9654;</span><div><div style="font-weight:600;">${t}</div><div class="meta" style="margin:0;">${a}</div></div>
+          ${i===0?`<span class="meta hot tip-t underline" data-tip="The tag editor: fix artist, title, album and track number in the file's own tags &mdash; or 'Fill in from file name'. Fixing the artist is what fixes wrong cover art.">&#9998; tags &middot; ${d}</span>`:`<span class="meta">${d}</span>`}</div>
+        `).join('')}
       </div>
       <div class="tile" style="margin-top:14px; display:flex; align-items:center; gap:14px;">
         <div style="width:44px;height:44px;border-radius:6px;background:#6FCF97;"></div>
         <div style="flex:1;">
-          <div style="font-weight:600; font-size:13px;">Night Drive &mdash; The Analog Kids</div>
-          <div class="hot tip-t" data-tip="Double-click the visualizer for a fullscreen view with six different styles &mdash; bars, waveform, radial burst, kaleidoscope, particles, or a classic oscilloscope trace." style="height:20px; background:linear-gradient(90deg,#6FCF97 30%,var(--divider) 30%); border-radius:3px; margin-top:6px;"></div>
+          <div style="font-weight:600; font-size:13px;" class="hot tip-t underline" data-tip="The mini player follows you everywhere in the app: seek, volume (remembered), shuffle, and a button to tuck it out of the way.">Night Drive &mdash; The Analog Kids</div>
+          <div class="hot tip-t" data-tip="Double-click the visualizer for fullscreen with six styles &mdash; bars, waveform, radial burst, kaleidoscope, particles, or a classic green oscilloscope. Click to cycle." style="height:20px; background:linear-gradient(90deg,#6FCF97 30%,var(--divider) 30%); border-radius:3px; margin-top:6px;"></div>
         </div>
       </div>`
   },
   'Videos': {
     sub: 'A floating player that follows you around the app',
     html: `
+      <div class="btn-row">
+        <button class="pill-btn hot tip-b underline" data-tip="Grabs a real frame from each video, entirely in your browser &mdash; nothing extra needed on the host.">Get thumbnails</button>
+        <button class="pill-btn ghost">Standardize names</button>
+        <button class="pill-btn ghost">Export&hellip;</button>
+      </div>
       <div class="grid-cards">
         ${['#E091B3','#7AA8F2','#F2B441'].map((c,i)=>`
           <div class="card">
-            <div class="thumb hot tip-t" style="background:${c};" data-tip="Real frame grabs, generated entirely in your browser the first time &mdash; no server-side video processing needed.">FRAME</div>
+            <div class="thumb" style="background:${c};">FRAME</div>
             <div class="name">trip_clip_0${i+1}.mp4</div>
             <div class="meta">214 plays</div>
           </div>
         `).join('')}
       </div>
-      <div class="tile hot tip-b" style="margin-top:14px; display:flex; align-items:center; gap:10px;" data-tip="Stays put and keeps playing even while you switch tabs or scroll around browsing other shelves.">
+      <div class="tile hot tip-b underline" style="margin-top:14px; display:flex; align-items:center; gap:10px;" data-tip="Stays put and keeps playing while you browse other shelves. When one ends, the next one starts.">
         <span>&#9654;</span><span style="font-size:13px;">trip_clip_01.mp4 &mdash; playing</span>
       </div>`
   },
   'Games': {
-    sub: "Single-file or zipped HTML5 games play right in the browser",
+    sub: "HTML5 games play right in the browser",
     html: `
       <div class="grid-cards">
-        ${[['Pixel Runner','var(--cat-games)'],['Block Puzzle','var(--cat-games)'],['Space Drift','var(--cat-games)']].map(([n,c])=>`
+        ${['Pixel Runner','Block Puzzle','Space Drift'].map((n,i)=>`
           <div class="card">
-            <div class="thumb" style="background:${c}; color:#12203a;">GAME</div>
+            ${i===0?`<div class="thumb hot tip-t underline" style="background:var(--cat-games); color:#12203a;" data-tip="Drop any picture onto a card to give it cover art.">GAME</div>`:`<div class="thumb" style="background:var(--cat-games); color:#12203a;">GAME</div>`}
             <div class="name">${n}</div>
-            <div class="card-actions"><button class="pill-btn hot tip-t" data-tip="Runs in a new browser tab, no download needed &mdash; a zipped game unpacks on the server the first time, instantly after that.">Play</button></div>
+            <div style="display:flex; gap:6px;"><button class="pill-btn hot tip-t" data-tip="Runs in a new tab, no download &mdash; a zipped game unpacks on the server the first time, instant after that.">Play</button><button class="pill-btn ghost">Download</button></div>
           </div>
         `).join('')}
       </div>`
   },
   'Programs': {
-    sub: 'Downloadable software, tracked by download count',
+    sub: 'Downloads for every computer in the house',
     html: `
       <div class="grid-cards">
-        ${[['Backup Utility v2.1'],['Photo Batch Renamer'],['Old Family Recipes.exe']].map(([n])=>`
+        ${['Backup Utility v2.1','Photo Batch Renamer','VLC Installer'].map(n=>`
           <div class="card">
             <div class="thumb" style="background:var(--cat-programs); color:#3a170f;">EXE</div>
             <div class="name">${n}</div>
-            <div class="meta hot tip-t" data-tip="Programs can't report back whether they were actually run, so downloads are the closest useful stand-in for 'plays'.">12 downloads</div>
+            <div class="meta hot tip-t" data-tip="Programs can't report back whether they were run, so downloads are the closest stand-in for 'plays'.">12 downloads</div>
           </div>
         `).join('')}
       </div>`
   },
   'Books / PDFs': {
-    sub: "Manuals and ebooks, read right in the browser",
+    sub: "A home library, read right in the browser",
     html: `
       <div class="grid-cards">
-        ${[['Camera Manual.pdf'],['Sourdough Notes.pdf'],["1972 Owner's Manual.pdf"]].map(([n])=>`
+        ${['Camera Manual.pdf','Sourdough Notes.pdf',"1972 Owner's Manual.pdf"].map((n,i)=>`
           <div class="card">
-            <div class="thumb" style="background:var(--cat-books); color:#2c1a3d;">PDF</div>
+            ${i===0?`<div class="thumb hot tip-t underline" style="background:var(--cat-books); color:#2c1a3d;" data-tip="Covers are made automatically from each PDF's first page, in the background.">PDF</div>`:`<div class="thumb" style="background:var(--cat-books); color:#2c1a3d;">PDF</div>`}
             <div class="name">${n}</div>
-            <div class="card-actions"><button class="pill-btn hot tip-t" data-tip="Opens in the browser's own built-in PDF viewer &mdash; nothing extra to install, no forced download.">Read</button></div>
+            <div style="display:flex; gap:6px; align-items:center;"><button class="pill-btn hot tip-t" data-tip="Opens in the browser's own PDF viewer &mdash; nothing to install, no forced download.">Read</button><span class="meta">3 times read</span></div>
           </div>
         `).join('')}
       </div>`
@@ -387,7 +415,7 @@ const SECTIONS = {
         <div class="row"><span>&#128221;</span><span>Grocery list</span></div>
         <div class="row"><span>&#128221;</span><span>Trip planning</span><span class="meta">has a photo</span></div>
       </div>
-      <div class="mock-page hot tip-t" data-tip="Everything here saves automatically as you type &mdash; no save button to remember. Paste an image (Ctrl+V) mid-note and it attaches as a thumbnail.">
+      <div class="mock-page hot tip-t" data-tip="Saves as you type &mdash; no save button. Paste an image (Ctrl+V) and it attaches as a thumbnail.">
         <strong>Trip planning</strong><br><br>
         Pack the tent, check tire pressure, print the reservation... <span style="opacity:.4;">|</span>
       </div>`
@@ -396,11 +424,12 @@ const SECTIONS = {
     sub: 'A tabbed drawing pad',
     html: `
       <div class="toolbar">
-        <span class="t hot tip-b" data-tip="Freehand drawing, the default tool.">Pen</span>
+        <span class="t hot tip-b" data-tip="Freehand drawing. Picking a color keeps your current tool.">Pen</span>
         <span class="t">Eraser</span>
-        <span class="t hot tip-b" data-tip="Click, then drag a handle to reposition before pressing Enter to stamp it onto the drawing.">Text</span>
-        <span class="t">Rect</span><span class="t">Circle</span><span class="t">Line</span>
-        <span class="t hot tip-b" data-tip="Copies the drawing straight to your clipboard as an image, ready to paste anywhere else on your computer.">Copy</span>
+        <span class="t hot tip-b" data-tip="Click to type, drag the handle to place it, Enter to stamp it on.">Text</span>
+        <span class="t">Rect</span><span class="t">Circle</span><span class="t">Line</span><span class="t">Undo</span>
+        <span class="t hot tip-b" data-tip="Copies the drawing to your clipboard as an image. Paste works the other way too &mdash; Ctrl+V drops an image onto the canvas.">Copy</span>
+        <span class="t">Save</span>
       </div>
       <div class="mock-page" style="min-height:180px; display:flex; align-items:center; justify-content:center; color:#9992; font-style:italic;">canvas</div>`
   },
@@ -409,9 +438,9 @@ const SECTIONS = {
     html: `
       <div class="toolbar">
         <span class="t"><b>B</b></span><span class="t"><i>I</i></span><span class="t"><u>U</u></span>
-        <span class="t">H1</span><span class="t">&bull; List</span>
+        <span class="t">H1</span><span class="t">&bull; List</span><span class="t">1. List</span><span class="t">Size</span>
       </div>
-      <div class="mock-page hot tip-t" data-tip="Paste an image (Ctrl+V) and it drops in right where your cursor is.">
+      <div class="mock-page hot tip-t" data-tip="Saves as you type. Paste an image (Ctrl+V) and it drops in right where your cursor is.">
         <h3 style="margin:0 0 8px;">Meeting notes &mdash; Sept 29</h3>
         Discussed the new shed layout. Need to order <b>2x4s</b> and confirm delivery window.
       </div>`
@@ -419,11 +448,12 @@ const SECTIONS = {
   'Sheets': {
     sub: 'A mini spreadsheet with real formulas',
     html: `
+      <p class="hint hot tip-b underline" style="display:inline-block;" data-tip="Drag a .csv, .tsv, .xls, .xlsx or .ods file onto this tab to bring it in as a new sheet.">Drop a spreadsheet here to import it</p>
       <div class="mock-sheet">
         <div class="head"></div><div class="head">A</div><div class="head">B</div><div class="head">C</div><div class="head">D</div><div class="head">E</div>
         <div class="head">1</div><div>Item</div><div>Qty</div><div>Price</div><div>Total</div><div></div>
-        <div class="head">2</div><div>Lumber</div><div>12</div><div>$6.50</div><div class="hot tip-t" data-tip="Type a formula starting with = &mdash; supports =SUM(), =AVERAGE(), and plain math like =A1+A2.">=B2*C2</div><div></div>
-        <div class="head">3</div><div>Screws</div><div>4</div><div>$3.00</div><div>=B3*C3</div><div></div>
+        <div class="head">2</div><div>Lumber</div><div>12</div><div>6.50</div><div class="hot tip-t" data-tip="Start with = &mdash; supports =SUM(), =AVERAGE(), and plain math like =A1+A2.">=B2*C2</div><div></div>
+        <div class="head">3</div><div>Screws</div><div>4</div><div>3.00</div><div>=B3*C3</div><div></div>
       </div>`
   },
   'Slides': {
@@ -434,24 +464,38 @@ const SECTIONS = {
           <div class="card" style="aspect-ratio:16/9; justify-content:center; align-items:center; background:var(--ink-deep);"><div class="name">${t}</div></div>
         `).join('')}
       </div>
-      <button class="pill-btn hot tip-t" style="margin-top:14px;" data-tip="Shows the deck full-screen &mdash; arrow keys move between slides, Esc exits.">Present</button>`
+      <button class="pill-btn hot tip-t" style="margin-top:14px;" data-tip="Full-screen &mdash; arrow keys move, Esc exits. Pasted pictures show up here too.">Present</button>`
   },
   'Messages': {
-    sub: 'Chat with other Shelf installs on the same Wi-Fi',
+    sub: 'Every Shelf finds every other Shelf',
     html: `
-      <div class="chat-log">
-        <div class="bubble them">Hey, did the backup finish?</div>
-        <div class="bubble me">Yep, just exported it &mdash; 4.2GB</div>
+      <div class="btn-row">
+        <span class="input-mock hot tip-b underline" data-tip="Your display name and status &mdash; Online, Away, Busy, or Appear offline.">Den-Pi &middot; Online &#9662;</span>
+        <button class="pill-btn ghost hot tip-b underline" data-tip="If one hides from you (say, on a guest Wi-Fi), scan again or add it by address &mdash; it tells you in plain words what's wrong.">Scan network</button>
+        <span class="input-mock">Add by address, e.g. 10.0.0.62</span>
       </div>
-      <div class="row hot tip-t" data-tip="Found automatically over the local network &mdash; no accounts, no adding contacts. Only works while both computers are on and running The Shelf.">
-        <span style="width:8px;height:8px;border-radius:50%;background:var(--mint);"></span> Kitchen-PC &mdash; online now
+      <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
+        <div style="flex:1; min-width:240px;">
+          <div class="chat-log">
+            <div class="bubble them">Hey, did the backup finish?</div>
+            <div class="bubble me">Yep, just exported it &mdash; 4.2GB</div>
+          </div>
+          <div class="row hot tip-t underline" data-tip="Found automatically &mdash; no accounts, no adding contacts. Messages go straight computer-to-computer, never through the internet. Paste a picture with Ctrl+V.">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--mint);"></span> Kitchen-PC &mdash; online now
+          </div>
+        </div>
+        <div class="menu-pop">
+          <div>Message<small>Chat with Kitchen-PC</small></div>
+          <div class="hot tip-t underline" data-tip="Opens their whole Shelf in a new tab &mdash; grab their pictures, music and games.">Connect Shelf<small>Open their Shelf in a new tab</small></div>
+          <div class="hot tip-t underline" data-tip="Their actual desktop in your browser, even from a phone &mdash; handy for helping from the other room. That computer needs a VNC server turned on.">Connect VNC<small>See and control their desktop</small></div>
+        </div>
       </div>`
   },
   'Visitors': {
     sub: "Everyone who's opened this Shelf",
     html: `
       <div class="row-list">
-        <div class="row hot tip-t" data-tip="Shows a hostname when one can be resolved, otherwise just the raw IP address.">
+        <div class="row hot tip-t" data-tip="Shows a name when one can be found, otherwise the IP address. 'Clear all' wipes the history.">
           <span style="width:8px;height:8px;border-radius:50%;background:var(--mint);"></span>
           <div><div>Kitchen-PC</div><div class="meta" style="margin:0;">first seen Sep 12 &middot; last seen just now</div></div>
         </div>
@@ -466,35 +510,76 @@ const SECTIONS = {
     html: `
       <div class="mock-page" style="background:var(--surface); border:1.5px dashed var(--divider); text-align:center; color:var(--text-muted); font-size:13px;">
         <strong style="color:var(--text);">Drop a file here, or click to choose one</strong><br>
-        No size limit &mdash; built for the 15-25GB range.
+        Disk images, backups, whole video projects &mdash; anyone on the network can drop in or download.
       </div>
-      <div class="progress-shell hot tip-t" style="margin-top:14px;" data-tip="Uploads go out in 16MB pieces instead of one giant request &mdash; a dropped connection only costs the current chunk. Drop the same file back in later and it resumes instead of restarting.">
+      <div class="progress-shell hot tip-t" style="margin-top:14px;" data-tip="Uploads go in 16MB pieces &mdash; a dropped connection only costs the current piece. Drop the same file back in later and it resumes.">
         <div class="progress-fill"></div><span>project_archive.zip &mdash; 12.4GB of 20GB (62%)</span>
       </div>`
   },
   'AI': {
-    sub: 'A small assistant that runs entirely on this computer',
+    sub: 'A private assistant that runs entirely on this computer',
     html: `
-      <div class="chat-log">
-        <div class="bubble me">What's in the Games shelf?</div>
-        <div class="bubble them">You've got Pixel Runner, Block Puzzle, and Space Drift on there right now.</div>
+      <div class="tile hot tip-b underline" style="margin-bottom:14px;" data-tip="The Shelf checks how much memory this computer has, lists the models that fit &mdash; tiny ones for a Raspberry Pi up to smarter ones for a desktop &mdash; and marks the one it recommends.">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <div class="switch on"></div><strong style="font-size:13.5px;">AI is on</strong>
+          <span class="badge">Recommended for this machine</span>
+          <button class="pill-btn" style="margin-left:auto;">Download &amp; use</button>
+        </div>
       </div>
-      <div class="empty-note hot tip-t" data-tip="No account, no API key, and no internet access needed once the model file is downloaded once &mdash; the whole conversation stays on this machine.">
-        Ask about anything &mdash; or ask what's on your shelves.
+      <div class="chat-log">
+        <div class="bubble me">What's a good name for a family photo album?</div>
+        <div class="bubble them">How about "The Good Stuff" or "Our Kind of Ordinary"?</div>
+      </div>
+      <div class="empty-note hot tip-t underline" data-tip="No account, no API key, no monthly fee &mdash; and nothing you type ever leaves this machine.">
+        After the one-time download, it works fully offline.
+      </div>`
+  },
+  'Tidy Suite': {
+    sub: '14 apps for home, money and getting things done',
+    html: `
+      <p class="hint">Open any app right here, or give it the whole window with <strong>Open in new tab</strong>. Each person's work saves in their own browser.</p>
+      <div class="grid-cards">
+        ${[['Tidy','spreadsheets'],['Neat','writing'],['Spruce','slides'],['Steady','bills &amp; debt'],['Clearout','selling stuff'],['Handy','side income'],['Sorted','repairs'],['Hearty','meals'],['Ready','calendar &amp; to-dos'],['Stocked','home inventory'],['Polished','job hunt'],['Chipper','chores &amp; allowance'],['Rugged','grid-down living'],['Snug','backup']].map(([n,d])=>
+          n==='Snug'
+          ? `<div class="card hot tip-t underline" data-tip="Makes a backup file of your suite work, or moves it to another device."><div class="name">${n}</div><div class="meta">${d}</div></div>`
+          : `<div class="card"><div class="name">${n}</div><div class="meta">${d}</div></div>`
+        ).join('')}
       </div>`
   },
 };
 
+function makeItem(item, extraHtml){
+  const d = document.createElement('div');
+  d.className = 'shelf-item hot tip-r underline';
+  const dec = document.createElement('textarea'); dec.innerHTML = item.tip;
+  d.dataset.tip = dec.value;
+  d.innerHTML = extraHtml + `<span>${item.key}</span>` + (item.isNew ? '<span class="new-badge">NEW</span>' : '');
+  d.addEventListener('click', ()=>{
+    document.querySelectorAll('.shelf-item.active').forEach(x=>x.classList.remove('active'));
+    d.classList.add('active');
+    render(item.key);
+    history.replaceState(null, '', '#' + encodeURIComponent(item.key));
+  });
+  return d;
+}
+const shelfNav = document.getElementById('shelfNav');
+SHELVES.forEach(s=>shelfNav.appendChild(makeItem(s, `<span class="swatch" style="--cat-color:${s.color}"></span>`)));
+const toolNav = document.getElementById('toolNav');
+TOOLS.forEach(t=>toolNav.appendChild(makeItem(t, '')));
+
 function render(key){
-  const s = SECTIONS[key];
-  document.getElementById('secTitle').textContent = key;
+  const s = SECTIONS[key] || SECTIONS.Home;
+  document.getElementById('secTitle').textContent = SECTIONS[key] ? key : 'Home';
   document.getElementById('secSub').innerHTML = s.sub;
   document.getElementById('content').innerHTML = s.html;
   wireTooltips(document.getElementById('content'));
+  window.scrollTo(0,0);
 }
 
 function wireTooltips(scope){
   scope.querySelectorAll('.hot').forEach(elm=>{
+    if(elm.dataset.wired) return;
+    elm.dataset.wired = '1';
     if(!elm.hasAttribute('tabindex')) elm.setAttribute('tabindex','0');
     elm.addEventListener('click', (e)=>{
       e.stopPropagation();
@@ -507,5 +592,11 @@ function wireTooltips(scope){
 document.addEventListener('click', ()=>document.querySelectorAll('.hot.show').forEach(x=>x.classList.remove('show')));
 
 wireTooltips(document);
-render('Home');
+const start = decodeURIComponent(location.hash.slice(1)) || 'Home';
+const startEl = [...document.querySelectorAll('.shelf-nav .shelf-item, .tool-nav .shelf-item')].find(x=>x.textContent.replace('NEW','').trim()===start) 
+  || [...document.querySelectorAll('.tool-nav .shelf-item')][0];
+startEl.classList.add('active');
+render(SECTIONS[start] ? start : 'Home');
 </script>
+</body>
+</html>
