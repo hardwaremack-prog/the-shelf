@@ -88,7 +88,7 @@ Raspberry Pi up to bigger, smarter ones for a desktop), and marks the one it rec
 | | |
 |:---:|:---:|
 | ![Home dashboard](docs/screenshots/home.png) | ![Music](docs/screenshots/music.png) |
-| **Home** — bulletin board, quick links, backup | **Music** — shuffle play, album art, play counts |
+| **Home** — bulletin board, quick links, backup | **Music** — shuffle play, album art, play counts; **MIDI** — its own shelf, played by a built-in synth |
 | ![Games](docs/screenshots/games.png) | ![Books / PDFs](docs/screenshots/books-pdfs.png) |
 | **Games** — play right in the browser | **Books / PDFs** — read or download |
 | ![Videos](docs/screenshots/videos.png) | ![Notes](docs/screenshots/notes.png) |
@@ -237,6 +237,10 @@ the terminal and press `Ctrl+C`.
     brightness/contrast/saturation, then either **Save** (overwrites the original) or
     **Save as copy** (keeps the original untouched and adds a new file alongside it). There's
     no crop tool yet — this covers straightening, flipping, and basic color/exposure fixes.
+- **MIDI**: its own shelf (the `MIDI` folder) for `.mid`, `.midi` and `.kar` files. Click one
+  to play it in the same mini player as Music, with shuffle, play counts, the seek bar and
+  the visualizer. The sound comes from a built-in General MIDI synth (instruments, drums and
+  reverb, from MIDI Vault) that runs in the browser, so it needs no internet or plug-ins.
 - **Music**: click a track to play it; each track shows the artist (read from the file's own
   tag, if it has one) as a small subtitle under its name. A mini player appears at the bottom
   with its album art (if it has any), play/pause, a seek bar, a small live visualizer, a

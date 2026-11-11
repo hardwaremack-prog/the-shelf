@@ -18,7 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 const SHARED_ROOT = path.join(__dirname, 'shared');
-const CATEGORIES = ['Pictures', 'Music', 'Videos', 'Games', 'Programs', 'Books'];
+const CATEGORIES = ['Pictures', 'Music', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
 
 // Where zipped HTML games get unzipped to, so they can be played in-browser.
 // Lives inside shared/ but starts with a dot, so it's invisible to the
@@ -120,13 +120,14 @@ function extOf(filename) {
 
 const PICTURE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic']);
 const MUSIC_EXT = new Set(['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac']);
+const MIDI_EXT = new Set(['mid', 'midi', 'kar', 'rmi']);   // the MIDI shelf; played by public/midi.js
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v', 'ogv', '3gp']);
 const PDF_EXT = new Set(['pdf']);
 
 function fileKind(filename) {
   const e = extOf(filename);
   if (PICTURE_EXT.has(e)) return 'image';
-  if (MUSIC_EXT.has(e)) return 'audio';
+  if (MUSIC_EXT.has(e) || MIDI_EXT.has(e)) return 'audio';
   if (VIDEO_EXT.has(e)) return 'video';
   if (PDF_EXT.has(e)) return 'pdf';
   return 'other';

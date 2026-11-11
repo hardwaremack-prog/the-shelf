@@ -1,6 +1,9 @@
+// The MIDI shelf is listed and played like Music (public/midi.js plays the files).
+const isMusicShelf = c => c === 'Music' || c === 'MIDI';
 const CATEGORY_COLORS = {
   Pictures: 'var(--cat-Pictures)',
   Music: 'var(--cat-Music)',
+  MIDI: 'var(--cat-MIDI)',
   Videos: 'var(--cat-Videos)',
   Games: 'var(--cat-Games)',
   Programs: 'var(--cat-Programs)',
@@ -337,7 +340,7 @@ async function loadFiles() {
 // still only know about that one narrow search result and stop instead
 // of continuing into the full library.
 function refreshMusicPlaylistIfPlaying() {
-  if (state.category !== 'Music' || !state.currentTrackName) return;
+  if (!isMusicShelf(state.category) || !state.currentTrackName) return;
   const idx = state.filtered.findIndex(f => f.name === state.currentTrackName);
   if (idx === -1) return; // the playing track isn't in the new view — leave the old snapshot as-is
   // Unchanged list (just a re-render) -- keep the current order, so a
@@ -351,9 +354,9 @@ function refreshMusicPlaylistIfPlaying() {
   state.musicPlaylistIndex = order.index;
 }
 
-const PLAY_COUNT_CATEGORIES = ['Music', 'Videos', 'Games', 'Programs', 'Books'];
+const PLAY_COUNT_CATEGORIES = ['Music', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
 // Shelves with the Export button (whole shelf as a .zip, or an Excel list).
-const EXPORT_CATEGORIES = ['Pictures', 'Music', 'Videos', 'Games', 'Programs', 'Books'];
+const EXPORT_CATEGORIES = ['Pictures', 'Music', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
 // "Recently added" = the last 30 days, newest first. If nothing's that new,
 // the newest few are shown instead of an empty shelf.
 const RECENT_DAYS = 30;
@@ -388,7 +391,7 @@ function updatePlayCountFilterLabels() {
   }
 
   const opts = [['', allLabel]];
-  if (state.category === 'Music') opts.push(['recent', 'Recently added']);
+  if (isMusicShelf(state.category)) opts.push(['recent', 'Recently added']);
   opts.push(['mostplayed', mostLabel]);
   if (state.category === 'Music') opts.push(['artist', 'Artist (A\u2013Z)']);
   opts.push(
@@ -410,7 +413,7 @@ function renderHeader() {
   el('#categorySub').textContent = `${n} item${n === 1 ? '' : 's'}`;
   el('#searchBox').hidden = false;
   el('#slideshowBtn').hidden = state.category !== 'Pictures' || n === 0;
-  el('#shuffleAllBtn').hidden = state.category !== 'Music' || n === 0;
+  el('#shuffleAllBtn').hidden = !isMusicShelf(state.category) || n === 0;
   el('#imagineBtn').hidden = state.category !== 'Pictures';
   el('#toolActionBtn').hidden = true;
   el('#aboutInfoBtn').hidden = state.category !== 'Games' && state.category !== 'Programs';
@@ -513,7 +516,7 @@ function renderContent() {
     return;
   }
 
-  if (state.category === 'Music') {
+  if (isMusicShelf(state.category)) {
     content.innerHTML = `<div class="track-list">${
       items.map((f, i) => `
         <div class="track-row" data-index="${i}" data-name="${encodeURIComponent(f.name)}" draggable="true">
@@ -527,7 +530,7 @@ function renderContent() {
           <span class="track-meta">${f.sizeLabel}</span>
           <span class="play-count">${formatPlayCount('Music', f.plays)}</span>
           <a class="track-download" href="${f.url}" download title="Download">&#8681;</a>
-          <button class="track-edit-tags" data-name="${encodeURIComponent(f.name)}" title="Edit tags (Artist, Title, Album)">&#127925;</button>
+          ${state.category === 'Music' ? `<button class="track-edit-tags" data-name="${encodeURIComponent(f.name)}" title="Edit tags (Artist, Title, Album)">&#127925;</button>` : ''}
           <button class="track-rename" data-name="${encodeURIComponent(f.name)}" title="Rename">&#127991;</button>
           <button class="track-remove" data-name="${encodeURIComponent(f.name)}" title="Remove">&times;</button>
         </div>
@@ -2505,7 +2508,7 @@ function playTrackFile(f, renderedIndex) {
     const row = document.querySelector(`.track-row[data-index="${renderedIndex}"]`);
     if (row) row.classList.add('playing');
   }
-  recordPlay('Music', f.name);
+  recordPlay(String(f.url || '').startsWith('/shared/MIDI/') ? 'MIDI' : 'Music', f.name);
 }
 
 // Advances to the next track in the snapshotted playlist, if there is one.
@@ -2855,6 +2858,7 @@ const exportBackdrop = el('#exportBackdrop');
 const EXPORT_WORDS = {
   Pictures: ['pictures', 'picture', 'pictures', 'Picture list', 'names, sizes and dates — no image files'],
   Music:    ['music', 'song', 'songs', 'Song list', 'names, artists, plays, sizes and dates — no audio'],
+  MIDI:     ['MIDI files', 'MIDI file', 'MIDI files', 'MIDI list', 'names, plays, sizes and dates — no MIDI files'],
   Videos:   ['videos', 'video', 'videos', 'Video list', 'names, plays, sizes and dates — no video files'],
   Games:    ['games', 'game', 'games', 'Game list', 'names, plays, sizes and dates — no game files'],
   Programs: ['programs', 'program', 'programs', 'Program list', 'names, downloads, sizes and dates — no program files'],
