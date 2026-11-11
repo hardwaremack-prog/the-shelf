@@ -1808,6 +1808,8 @@ async function preparePcmViz() {
   if (!src || pcmViz.src === src) return; // already ready or on its way for this track
   pcmViz = { src, data: null, rate: PCM_VIZ_RATE, ready: false, fallback: false };
   pcmVizSmoothed.fill(0);
+  // MIDI isn't audio to decode: midi.js feeds the bars straight from its synth instead
+  if (/\.(mid|midi|kar|rmi)$/i.test(decodeURIComponent(String(src).split('?')[0]))) return;
   const useFallback = () => {
     if (pcmViz.src !== src) return;
     pcmViz.fallback = true;
@@ -2576,6 +2578,7 @@ function toggleMusicPlayPause() {
 }
 
 el('#miniPlayPause').addEventListener('click', toggleMusicPlayPause);
+el('#miniNext').addEventListener('click', () => playNextTrack());
 
 function stopMusicPlayback() {
   musicIntentPlaying = false;

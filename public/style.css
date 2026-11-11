@@ -1351,6 +1351,13 @@ button, select, input {
 }
 .mini-close:hover { color: var(--text); }
 
+.mini-next {
+  background: none; border: none; color: var(--text-muted);
+  width: 34px; height: 34px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0; padding: 0;
+}
+.mini-next:hover { color: var(--text); background: var(--ink-deep); }
 .mini-shuffle {
   position: relative;
   background: none;
@@ -1564,7 +1571,7 @@ button, select, input {
 
 .fullscreen-viz-title {
   position: absolute;
-  bottom: 80px;
+  bottom: calc(80px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   color: var(--text);
@@ -1595,7 +1602,7 @@ button, select, input {
 
 .fullscreen-viz-controls {
   position: absolute;
-  bottom: 24px;
+  bottom: calc(24px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -3078,13 +3085,17 @@ img.sticky-media { cursor: pointer; touch-action: manipulation; }
     top: 20px;
     right: 20px;
   }
+  /* The controls sit above the iPhone's home-indicator strip, the title above the controls
+     and the hint above the title: each one's position adds the strip's height, so they
+     stack instead of overlapping. */
+  .fullscreen-viz-controls { bottom: calc(14px + env(safe-area-inset-bottom)); max-width: calc(100vw - 24px); }
+  .fullscreen-viz-title { bottom: calc(96px + env(safe-area-inset-bottom)); max-width: 86vw; font-size: 15px; }
   .fullscreen-viz-style-hint {
     top: auto;
-    bottom: 112px;
+    bottom: calc(126px + env(safe-area-inset-bottom));
     font-size: 11.5px;
     max-width: 80vw;
   }
-  .fullscreen-viz-title { bottom: 78px; max-width: 70vw; }
 
   .photo-editor-overlay { padding: 0; }
   .photo-editor-panel { max-height: 100vh; border-radius: 0; }
@@ -3107,17 +3118,18 @@ img.sticky-media { cursor: pointer; touch-action: manipulation; }
     height: auto;
     padding: 10px 12px;
     display: grid;
-    grid-template-columns: auto auto 1fr auto auto auto;
+    grid-template-columns: auto auto auto minmax(0, 1fr) auto auto auto;
     grid-template-areas:
-      "art play viz shuffle collapse close"
-      "info info info info info info";
+      "art play next viz shuffle collapse close"
+      "info info info info info info info";
     column-gap: 10px;
     row-gap: 8px;
     align-items: center;
   }
   .mini-art { grid-area: art; width: 36px; height: 36px; }
   #miniPlayPause { grid-area: play; }
-  #miniVisualizer { grid-area: viz; }
+  .mini-next { grid-area: next; }
+  #miniVisualizer { grid-area: viz; width: 100%; min-width: 0; }
   .mini-close { grid-area: close; justify-self: end; }
   .volume-control { display: none; }
   .mini-info { grid-area: info; min-width: 0; }
@@ -3125,8 +3137,8 @@ img.sticky-media { cursor: pointer; touch-action: manipulation; }
   .mini-shuffle { grid-area: shuffle; justify-self: end; }
   .mini-player.minimized {
     left: auto;
-    grid-template-columns: auto auto auto;
-    grid-template-areas: "art play collapse";
+    grid-template-columns: auto auto auto auto;
+    grid-template-areas: "art play next collapse";
     padding-top: 6px;
   }
 
@@ -3192,7 +3204,7 @@ img.sticky-media { cursor: pointer; touch-action: manipulation; }
      the browser's own chrome is hidden entirely — can end up sitting
      right in that strip. Padding by the safe-area inset keeps controls
      clear of it; it's simply 0px on anything that doesn't need it. */
-  .mini-player, .slide-controls, .fullscreen-viz-controls {
+  .mini-player, .slide-controls {
     padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
   .slideshow-caption, .present-counter {
