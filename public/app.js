@@ -413,6 +413,7 @@ function renderHeader() {
   el('#categorySub').textContent = `${n} item${n === 1 ? '' : 's'}`;
   el('#searchBox').hidden = false;
   el('#slideshowBtn').hidden = state.category !== 'Pictures' || n === 0;
+  el('#coversSlideshowBtn').hidden = state.category !== 'Pictures';
   el('#shuffleAllBtn').hidden = !isMusicShelf(state.category) || n === 0;
   el('#imagineBtn').hidden = state.category !== 'Pictures';
   el('#toolActionBtn').hidden = true;
@@ -447,6 +448,7 @@ function setToolHeader(title, sub, actionLabel, onAction) {
   el('#searchBox').hidden = true;
   el('#playCountFilter').hidden = true;
   el('#slideshowBtn').hidden = true;
+  el('#coversSlideshowBtn').hidden = true;
   el('#shuffleAllBtn').hidden = true;
   el('#imagineBtn').hidden = true;
   el('#aboutInfoBtn').hidden = true;
@@ -2748,7 +2750,11 @@ const overlay = el('#slideshowOverlay');
 const slideImg = el('#slideshowImg');
 const slideCaption = el('#slideshowCaption');
 
-function openSlideshow(index) {
+// The slideshow shows a list of {name, url}: the Pictures shelf, or the album covers.
+function slideList() { return state.slideshow.list || state.filtered; }
+
+function openSlideshow(index, list) {
+  state.slideshow.list = list || null;
   state.slideshow.index = index;
   state.slideshow.playing = true;
   overlay.hidden = false;
@@ -2804,12 +2810,13 @@ function applyKenBurns(imgEl, durationMs) {
 }
 
 function showSlide() {
-  const f = state.filtered[state.slideshow.index];
+  const list = slideList();
+  const f = list[state.slideshow.index];
   if (!f) return;
   slideImg.classList.remove('visible');
   setTimeout(() => {
     slideImg.src = f.url;
-    slideCaption.textContent = `${f.name} — ${state.slideshow.index + 1} of ${state.filtered.length}`;
+    slideCaption.textContent = `${f.name} — ${state.slideshow.index + 1} of ${list.length}`;
     slideImg.onload = () => {
       slideImg.classList.add('visible');
       // A little longer than the slide interval so the motion doesn't
@@ -2820,12 +2827,12 @@ function showSlide() {
 }
 
 function nextSlide() {
-  state.slideshow.index = (state.slideshow.index + 1) % state.filtered.length;
+  state.slideshow.index = (state.slideshow.index + 1) % slideList().length;
   showSlide();
 }
 
 function prevSlide() {
-  state.slideshow.index = (state.slideshow.index - 1 + state.filtered.length) % state.filtered.length;
+  state.slideshow.index = (state.slideshow.index - 1 + slideList().length) % slideList().length;
   showSlide();
 }
 
@@ -2846,6 +2853,31 @@ function closeSlideshow() {
 }
 
 el('#slideshowBtn').addEventListener('click', () => openSlideshow(0));
+
+// Album covers: one slide per artist's cover (or per song, for songs with no artist tag),
+// from the art already saved for the Music shelf, in random order.
+el('#coversSlideshowBtn').addEventListener('click', async () => {
+  const btn = el('#coversSlideshowBtn');
+  btn.disabled = true;
+  try {
+    const tracks = await fetch('/api/files?category=Music').then(r => r.json());
+    const seen = new Set(), covers = [];
+    for (const t of tracks) {
+      if (!t.artUrl) continue;
+      const artist = (t.artist || '').trim();
+      const key = artist ? 'a:' + artist.toLowerCase() : 'u:' + t.artUrl.split('?')[0];
+      if (seen.has(key)) continue;
+      seen.add(key);
+      covers.push({ name: artist || t.name.replace(/\.[^.]+$/, ''), url: t.artUrl });
+    }
+    if (!covers.length) { alert('No album covers yet. Covers come from the art inside your songs, or from "Fetch album art" on the Music shelf.'); return; }
+    openSlideshow(0, shuffledCopy(covers));
+  } catch {
+    alert("Couldn't load the Music shelf.");
+  } finally {
+    btn.disabled = false;
+  }
+});
 el('#standardizeNamesBtn').addEventListener('click', standardizeNames);
 el('#removeDuplicatesBtn').addEventListener('click', removeDuplicates);
 el('#fetchArtBtn').addEventListener('click', fetchAlbumArt);
