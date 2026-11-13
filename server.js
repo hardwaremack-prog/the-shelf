@@ -4721,6 +4721,161 @@ function handleVncUpgrade(req, socket, head) {
   return true;
 }
 
+
+// ---------------------------------------------------------------------------
+// Mesh Coms through a Shelf board.
+// The Heltec and ESP32 boards running The Shelf talk to each other over 900 MHz LoRa and 2.4 GHz
+// (ESP-NOW). A computer can't send those radio frames itself, so this copy joins the mesh through
+// a board on the same network: /api/mesh/... is passed on to that board's /api/coms/....
+// The board is picked from the Shelves this copy has met (any name starting "shelf-"), or set by hand.
+const MESH_FILE = path.join(DATA_ROOT, 'mesh.json');
+const BOARD_NAME_RE = /^shelf-(v3|v4|v4-r8|esp32)-/i;
+function loadMeshSettings() { try { return JSON.parse(fs.readFileSync(MESH_FILE, 'utf8')); } catch { return {}; } }
+function saveMeshSettings(m) { fs.writeFileSync(MESH_FILE, JSON.stringify(m)); }
+function meshCandidates() {
+  const known = loadKnownPeers();
+  return Object.values(known)
+    .filter(p => p && p.ip && BOARD_NAME_RE.test(p.name || ''))
+    .sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0))
+    .map(p => ({ name: p.name, ip: p.ip, lastSeenAt: p.lastSeenAt || 0 }));
+}
+async function boardAnswers(ip) {
+  try {
+    const r = await fetch(`http://${ip}/api/coms`, { signal: AbortSignal.timeout(2500) });
+    return r.ok;
+  } catch { return false; }
+}
+let meshGatewayCache = { ip: null, at: 0 };
+async function meshGateway() {
+  const set = loadMeshSettings();
+  if (set.gateway) return set.gateway;                       // picked by hand
+  if (meshGatewayCache.ip && Date.now() - meshGatewayCache.at < 60000) return meshGatewayCache.ip;
+  for (const c of meshCandidates()) {
+    if (await boardAnswers(c.ip)) { meshGatewayCache = { ip: c.ip, at: Date.now() }; return c.ip; }
+  }
+  meshGatewayCache = { ip: null, at: Date.now() };
+  return null;
+}
+
+app.get('/api/mesh-gateway', async (req, res) => {
+  const set = loadMeshSettings();
+  const ip = await meshGateway();
+  res.json({ gateway: ip, manual: !!set.gateway, candidates: meshCandidates() });
+});
+app.post('/api/mesh-gateway', (req, res) => {
+  const ip = String((req.body && req.body.gateway) || '').trim();
+  if (ip && !/^[0-9a-zA-Z.\-:]+$/.test(ip)) return res.status(400).json({ error: 'That doesn\'t look like an address.' });
+  const set = loadMeshSettings();
+  if (ip) set.gateway = ip; else delete set.gateway;
+  saveMeshSettings(set);
+  meshGatewayCache = { ip: null, at: 0 };
+  res.json({ ok: true, gateway: ip || null });
+});
+
+app.all(/^\/api\/mesh(\/.*)?$/, async (req, res) => {
+  const ip = await meshGateway();
+  if (!ip) return res.status(503).json({ error: 'No Shelf board found on your network. Turn on a Heltec or ESP32 board running The Shelf on the same Wi-Fi, or type its address.' });
+  const rest = req.params[0] || '';
+  const query = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+  try {
+    const init = { method: req.method, signal: AbortSignal.timeout(15000), headers: {} };
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      init.headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(req.body || {});
+    }
+    const r = await fetch(`http://${ip}/api/coms${rest}${query}`, init);
+    const text = await r.text();
+    res.status(r.status).type(r.headers.get('content-type') || 'application/json').send(text);
+  } catch (err) {
+    meshGatewayCache = { ip: null, at: 0 };
+    res.status(502).json({ error: `The board at ${ip} didn't answer.` });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Updating The Shelf from GitHub.
+// Downloads the newest copy of github.com/hardwaremack-prog/the-shelf, puts its files over this
+// install (your shelves in shared/ and everything in data/ are never touched), installs any new
+// libraries, and restarts. Only from the computer The Shelf runs on.
+const UPDATE_REPO = 'hardwaremack-prog/the-shelf';
+const VERSION_FILE = path.join(__dirname, '.shelf-version.json');
+function installedVersion() { try { return JSON.parse(fs.readFileSync(VERSION_FILE, 'utf8')); } catch { return null; } }
+let latestCache = { at: 0, data: null };
+async function latestVersion() {
+  if (latestCache.data && Date.now() - latestCache.at < 5 * 60 * 1000) return latestCache.data;
+  const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/commits/main`, {
+    headers: { 'User-Agent': 'TheShelf', Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(10000)
+  });
+  if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
+  const j = await r.json();
+  const data = { sha: j.sha, date: j.commit && j.commit.committer && j.commit.committer.date, message: ((j.commit && j.commit.message) || '').split('\n')[0] };
+  latestCache = { at: Date.now(), data };
+  return data;
+}
+let updating = false;
+
+app.get('/api/app/version', async (req, res) => {
+  const current = installedVersion();
+  const gitCheckout = fs.existsSync(path.join(__dirname, '.git'));
+  let latest = null, error = null;
+  try { latest = await latestVersion(); } catch (err) { error = `Couldn't reach GitHub (${err.message}).`; }
+  res.json({
+    current, latest, error, gitCheckout, canUpdate: isLocalRequest(req) && !gitCheckout,
+    upToDate: !!(current && latest && current.sha === latest.sha)
+  });
+});
+
+app.post('/api/app/update', async (req, res) => {
+  if (!isLocalRequest(req)) return res.status(403).json({ error: 'Updates can only be started on the computer The Shelf runs on.' });
+  if (fs.existsSync(path.join(__dirname, '.git'))) return res.status(400).json({ error: 'This copy is a git checkout: update it with git pull.' });
+  if (updating) return res.status(409).json({ error: 'An update is already running.' });
+  updating = true;
+  try {
+    latestCache = { at: 0, data: null };
+    const latest = await latestVersion();
+    const zr = await fetch(`https://codeload.github.com/${UPDATE_REPO}/zip/${latest.sha}`, { signal: AbortSignal.timeout(120000) });
+    if (!zr.ok) throw new Error(`download failed (${zr.status})`);
+    const zip = new AdmZip(Buffer.from(await zr.arrayBuffer()));
+    const before = ['package.json', 'package-lock.json'].map(f => { try { return fs.readFileSync(path.join(__dirname, f), 'utf8'); } catch { return ''; } });
+    let written = 0;
+    for (const e of zip.getEntries()) {
+      const rel = e.entryName.split('/').slice(1).join('/');          // drop "the-shelf-<sha>/"
+      if (!rel || e.isDirectory) continue;
+      const top = rel.split('/')[0];
+      if (['shared', 'data', 'node_modules', '.git'].includes(top)) continue;
+      const dest = path.join(__dirname, ...rel.split('/'));
+      if (!dest.startsWith(__dirname + path.sep)) continue;
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, e.getData());
+      written++;
+    }
+    const after = ['package.json', 'package-lock.json'].map(f => { try { return fs.readFileSync(path.join(__dirname, f), 'utf8'); } catch { return ''; } });
+    let libraries = 'unchanged';
+    if (before[0] !== after[0] || before[1] !== after[1]) {
+      const npmCli = [path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+                      path.join(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+                      '/usr/share/nodejs/npm/bin/npm-cli.js'].find(p => fs.existsSync(p));
+      const args = npmCli ? [npmCli, 'install', '--omit=dev', '--no-audit', '--no-fund'] : null;
+      const result = args
+        ? require('child_process').spawnSync(process.execPath, args, { cwd: __dirname, windowsHide: true, timeout: 10 * 60 * 1000 })
+        : require('child_process').spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], { cwd: __dirname, windowsHide: true, shell: process.platform === 'win32', timeout: 10 * 60 * 1000 });
+      libraries = result.status === 0 ? 'updated' : 'failed';
+    }
+    fs.writeFileSync(VERSION_FILE, JSON.stringify({ sha: latest.sha, date: latest.date, message: latest.message, installedAt: Date.now() }));
+    res.json({ ok: true, files: written, libraries, version: latest, restarting: true });
+    // Start the new copy once this one has let go of the port, then step aside.
+    setTimeout(() => {
+      const boot = `setTimeout(()=>{process.chdir(${JSON.stringify(__dirname)});require(${JSON.stringify(path.join(__dirname, 'server.js'))})},2500)`;
+      const child = require('child_process').spawn(process.execPath, ['-e', boot], { cwd: __dirname, detached: true, stdio: 'ignore', windowsHide: true, env: process.env });
+      child.unref();
+      process.exit(0);
+    }, 800);
+  } catch (err) {
+    updating = false;
+    if (!res.headersSent) res.status(500).json({ error: `Update failed: ${err.message}. Nothing was restarted.` });
+  }
+});
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   const ips = getLocalIPs();
   console.log('\nThe Shelf is up.');

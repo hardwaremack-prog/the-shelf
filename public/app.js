@@ -63,6 +63,7 @@ const TOOLS = [
   { key: 'visitors', label: 'Visitors', color: 'var(--cat-Videos)' },
   { key: 'bigfiles', label: 'Big Transfer', color: 'var(--coral)' },
   { key: 'ai', label: 'AI', color: 'var(--cat-Books)' },
+  { key: 'mesh', label: 'Mesh Coms', color: '#E2725B' },
   { key: 'tidysuite', label: 'Tidy Suite', color: '#3FA796' }
 ];
 const TOOL_LABELS = Object.fromEntries(TOOLS.map(t => [t.key, t.label]));
@@ -300,6 +301,7 @@ async function selectTool(key) {
   else if (key === 'ai') loadAiView();
   else if (key === 'bigfiles') loadBigfilesView();
   else if (key === 'tidysuite') loadTidySuiteView();
+  else if (key === 'mesh' && window.loadMeshView) window.loadMeshView();
 }
 
 // ---------- Tidy Suite ----------
@@ -1403,13 +1405,52 @@ const ABOUT_SHELF_TEXT = "The Shelf is a self-hosted hub that turns any spare co
 function openAboutOverlay() {
   el('#aboutText').textContent = ABOUT_SHELF_TEXT;
   el('#aboutOverlay').hidden = false;
+  checkShelfUpdate();
 }
+
+// ---------- Updating from GitHub ----------
+// Checks github.com/hardwaremack-prog/the-shelf for a newer version and, on the computer
+// The Shelf runs on, installs it (shared/ and data/ are never touched) and restarts.
+async function checkShelfUpdate() {
+  const box = el('#shelfUpdateBox');
+  if (!box) return;
+  box.hidden = false;
+  const msg = el('#shelfUpdateMsg'), btn = el('#shelfUpdateBtn');
+  msg.textContent = 'Checking GitHub for a newer version\u2026'; btn.hidden = true;
+  let v;
+  try { v = await fetch('/api/app/version').then(r => r.json()); } catch { msg.textContent = "Couldn't check for updates."; return; }
+  const day = d => d ? new Date(d).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+  if (v.error) { msg.textContent = v.error; return; }
+  if (v.gitCheckout) { msg.textContent = 'This copy runs from a git checkout: update it with git pull.'; return; }
+  if (v.upToDate) { msg.textContent = `Up to date (${day(v.latest.date)}: ${v.latest.message}).`; return; }
+  msg.textContent = `A newer version is on GitHub (${day(v.latest.date)}: ${v.latest.message}).` + (v.current ? ` This copy is from ${day(v.current.date)}.` : '');
+  if (v.canUpdate) { btn.hidden = false; }
+  else msg.textContent += ' Open The Shelf on the computer it runs on to update it.';
+}
+el('#shelfUpdateBtn') && el('#shelfUpdateBtn').addEventListener('click', async () => {
+  const msg = el('#shelfUpdateMsg'), btn = el('#shelfUpdateBtn');
+  if (!confirm('Download the newest version from GitHub and restart The Shelf? Your shelves, notes, messages and settings stay as they are.')) return;
+  btn.disabled = true; msg.textContent = 'Downloading and installing\u2026 (this can take a minute)';
+  try {
+    const r = await fetch('/api/app/update', { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Update failed.');
+    msg.textContent = `Installed${j.libraries === 'updated' ? ', with new libraries' : j.libraries === 'failed' ? ' (but installing new libraries failed: run the installer again if anything is missing)' : ''}. Restarting\u2026`;
+    // wait for the new copy to answer, then reload
+    for (let i = 0; i < 60; i++) {
+      await new Promise(res => setTimeout(res, 2000));
+      try { const ok = await fetch('/api/app/version', { cache: 'no-store' }); if (ok.ok) { location.reload(); return; } } catch { /* still restarting */ }
+    }
+    msg.textContent = 'Installed. Reload this page in a moment.';
+  } catch (err) { msg.textContent = err.message; btn.disabled = false; }
+});
 
 function closeAboutOverlay() {
   el('#aboutOverlay').hidden = true;
 }
 
 el('#aboutInfoBtn').addEventListener('click', openAboutOverlay);
+el('#sidebarUpdateBtn') && el('#sidebarUpdateBtn').addEventListener('click', () => { openAboutOverlay(); setTimeout(() => { const b = el('#shelfUpdateBox'); if (b) b.scrollIntoView({ block: 'nearest' }); }, 50); });
 el('#aboutClose').addEventListener('click', closeAboutOverlay);
 el('#aboutOverlay').addEventListener('click', (e) => {
   if (e.target.id === 'aboutOverlay') closeAboutOverlay(); // click on the dimmed backdrop, not the panel itself
@@ -5506,6 +5547,10 @@ function renderMessages() {
   // Keep your place in a long chat: the background refresh rebuilds the
   // thread, which used to jump to the bottom even while you scrolled back.
   const oldBox = el('#threadMessages');
+  // ...and your place in the list of people (it's rebuilt too, and used to jump to the top)
+  const oldList = content.querySelector('.msg-pane .split-list');
+  const oldListTop = oldList ? oldList.scrollTop : 0;
+  const oldPageY = window.scrollY;
   const oldScroll = oldBox && oldBox.dataset.peer === String(m.activePeerId)
     ? { top: oldBox.scrollTop, atBottom: oldBox.scrollHeight - oldBox.scrollTop - oldBox.clientHeight < 40, count: oldBox.childElementCount }
     : null;
@@ -5538,7 +5583,7 @@ function renderMessages() {
     <div class="split-pane msg-pane">
       <div class="split-list">
         ${m.conversations.length ? `<div class="list-section-label">Conversations</div>` : ''}
-        ${m.conversations.map(c => `
+        ${m.conversations.slice().sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0)).map(c => `
           <div class="conv-row ${c.id === m.activePeerId ? 'active' : ''}" data-id="${c.id}" data-name="${escapeHtml(c.name)}" data-ip="${escapeHtml(c.ip || '')}" data-port="${escapeHtml(String(c.httpPort || ''))}">
             <span class="status-dot-inline ${c.online ? 'status-online' : 'status-offline'}"></span>
             <div class="conv-name-wrap">
@@ -5550,7 +5595,7 @@ function renderMessages() {
           </div>
         `).join('')}
         ${onlineOthers.length ? `<div class="list-section-label">Online now</div>${onlineOthers.map(peerRow).join('')}` : ''}
-        ${offlineOthers.length ? `<div class="list-section-label">Seen before</div>${offlineOthers.map(peerRow).join('')}` : ''}
+        ${offlineOthers.length ? `<details class="seen-before" ${m.seenOpen ? 'open' : ''}><summary class="list-section-label">Seen before (${offlineOthers.length})</summary>${offlineOthers.map(peerRow).join('')}</details>` : ''}
         ${!m.conversations.length && !others.length ? `<p class="no-peers">No other copies of The Shelf found on your network yet. ${m.scanning ? 'Scanning now&hellip;' : 'Try <strong>Scan network</strong> above.'}</p>` : ''}
       </div>
       <div class="thread-wrap">
@@ -5611,6 +5656,11 @@ function renderMessages() {
     }
   }
 
+  const newList = content.querySelector('.msg-pane .split-list');
+  if (newList) newList.scrollTop = oldListTop;
+  if (oldList && Math.abs(window.scrollY - oldPageY) > 2) window.scrollTo(0, oldPageY);   // (a refresh, not arriving)
+  const seenBox = content.querySelector('.seen-before');
+  if (seenBox) seenBox.addEventListener('toggle', () => { m.seenOpen = seenBox.open; });
   if (preserve) {
     const toRestore = el(`#${preserve.id}`);
     if (toRestore) {

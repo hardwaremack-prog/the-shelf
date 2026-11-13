@@ -78,6 +78,7 @@
         <div class="network-url" id="networkUrl">detecting&hellip;</div>
       </div>
     </div>
+    <button class="sidebar-update-btn" id="sidebarUpdateBtn" title="Check GitHub for a newer version of The Shelf">Check for updates</button>
   </aside>
 
   <main class="main">
@@ -345,6 +346,11 @@
     <button class="slide-close" id="aboutClose" aria-label="Close">&times;</button>
     <h2>About The Shelf</h2>
     <p id="aboutText"></p>
+    <div class="shelf-update" id="shelfUpdateBox" hidden>
+      <h3>Updates</h3>
+      <p id="shelfUpdateMsg"></p>
+      <button class="tool-action-btn" id="shelfUpdateBtn" hidden>Update now</button>
+    </div>
   </div>
 </div>
 
@@ -470,6 +476,7 @@
   }
 </script>
 <script src="app.js"></script>
+<script src="mesh-coms.js"></script>
 <script src="midi.js"></script>
 </body>
 </html>
