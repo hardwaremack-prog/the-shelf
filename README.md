@@ -128,6 +128,18 @@ Not sure which you have? Run `node -v` — if it says `v20` or higher, you're al
 you skip this and try to use the AI tab anyway, The Shelf will tell you plainly what's wrong
 and how to fix it, rather than failing with a confusing error.
 
+## Install with one line
+
+**Windows** (PowerShell):
+```
+irm https://raw.githubusercontent.com/hardwaremack-prog/the-shelf/main/install.ps1 | iex
+```
+**Mac, Linux, Raspberry Pi** (Terminal):
+```
+curl -fsSL https://raw.githubusercontent.com/hardwaremack-prog/the-shelf/main/install.sh | bash
+```
+Each gets Node.js if it's missing, downloads the newest The Shelf from GitHub and opens the setup page below. Install page: [hardwaremack-prog.github.io/The-Shelf-Heltec-V4900mhzMesh/pc.html](https://hardwaremack-prog.github.io/The-Shelf-Heltec-V4900mhzMesh/pc.html). After that, **Check for updates** at the bottom of the sidebar keeps it current.
+
 ## Setup (do this once)
 
 **Easiest way:**
