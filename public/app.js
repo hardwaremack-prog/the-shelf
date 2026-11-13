@@ -172,7 +172,7 @@ const state = {
   category: 'Pictures',
   files: [],
   filtered: [],
-  slideshow: { index: 0, playing: true, timer: null, seconds: 4, kenBurns: true, musicStartedByUs: false },
+  slideshow: { index: 0, playing: true, timer: null, seconds: 7, kenBurns: true, musicStartedByUs: false },
   currentTrackName: null,
   musicPlaylist: [],
   musicSourceList: [],
@@ -3162,14 +3162,30 @@ document.addEventListener('fullscreenchange', () => {
   }
 });
 
+// The slideshow's speed and Ken Burns setting are remembered in this browser (7 seconds with
+// Ken Burns until someone changes them).
+try {
+  const saved = JSON.parse(localStorage.getItem('shelf.slideshow') || '{}');
+  if (saved.seconds >= 2 && saved.seconds <= 15) state.slideshow.seconds = saved.seconds;
+  if (typeof saved.kenBurns === 'boolean') state.slideshow.kenBurns = saved.kenBurns;
+} catch (e) { /* private browsing or blocked storage: the defaults */ }
+el('#slideSpeed').value = state.slideshow.seconds;
+el('#slideSpeedVal').textContent = `${state.slideshow.seconds}s`;
+el('#kenBurnsToggle').checked = state.slideshow.kenBurns;
+function saveSlideshowPrefs() {
+  try { localStorage.setItem('shelf.slideshow', JSON.stringify({ seconds: state.slideshow.seconds, kenBurns: state.slideshow.kenBurns })); } catch (e) {}
+}
+
 el('#slideSpeed').addEventListener('input', (e) => {
   state.slideshow.seconds = Number(e.target.value);
   el('#slideSpeedVal').textContent = `${e.target.value}s`;
+  saveSlideshowPrefs();
   startSlideTimer();
 });
 
 el('#kenBurnsToggle').addEventListener('change', (e) => {
   state.slideshow.kenBurns = e.target.checked;
+  saveSlideshowPrefs();
   if (!e.target.checked) slideImg.getAnimations().forEach(anim => anim.cancel());
   updateSlideshowFitMode();
 });
