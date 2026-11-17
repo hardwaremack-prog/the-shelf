@@ -1446,14 +1446,21 @@ async function checkShelfUpdate() {
   if (!box) return;
   box.hidden = false;
   const msg = el('#shelfUpdateMsg'), btn = el('#shelfUpdateBtn');
-  msg.textContent = 'Checking GitHub for a newer version\u2026'; btn.hidden = true;
+  msg.textContent = 'Checking GitHub for a newer version\u2026'; btn.hidden = true; btn.disabled = false;
+  btn.textContent = 'Update now';
   let v;
   try { v = await fetch('/api/app/version?fresh=1', { cache: 'no-store' }).then(r => r.json()); } catch { msg.textContent = "Couldn't check for updates."; return; }
   const day = d => d ? new Date(d).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) : '';
-  if (v.error) { msg.textContent = v.error; return; }
-  if (v.gitCheckout) { msg.textContent = 'This copy runs from a git checkout: update it with git pull.'; return; }
+  const gitNote = v.gitCheckout ? ' (This copy came from a git checkout; updating replaces its app files with GitHub\u2019s.)' : '';
+  if (v.error) {
+    // The version check failed, but the update itself can often still work (it downloads directly).
+    msg.textContent = v.error;
+    if (v.canUpdate) { btn.textContent = 'Try updating anyway'; btn.hidden = false; }
+    else msg.textContent += ' Open The Shelf on the computer it runs on to update it.';
+    return;
+  }
   if (v.upToDate) { msg.textContent = `Up to date (${day(v.latest.date)}: ${v.latest.message}).`; return; }
-  msg.textContent = `A newer version is on GitHub (${day(v.latest.date)}: ${v.latest.message}).` + (v.current ? ` This copy is from ${day(v.current.date)}.` : '');
+  msg.textContent = `A newer version is on GitHub (${day(v.latest.date)}: ${v.latest.message}).` + (v.current ? ` This copy is from ${day(v.current.date)}.` : '') + gitNote;
   if (v.canUpdate) { btn.hidden = false; }
   else msg.textContent += ' Open The Shelf on the computer it runs on to update it.';
 }
@@ -1471,7 +1478,7 @@ el('#shelfUpdateBtn') && el('#shelfUpdateBtn').addEventListener('click', async (
       await new Promise(res => setTimeout(res, 2000));
       try { const ok = await fetch('/api/app/version', { cache: 'no-store' }); if (ok.ok) { location.reload(); return; } } catch { /* still restarting */ }
     }
-    msg.textContent = 'Installed. Reload this page in a moment.';
+    msg.textContent = 'The new version is installed, but The Shelf hasn’t answered yet. Reload this page in a moment; if it still doesn’t load, start The Shelf again (run the installer, or restart this computer).';
   } catch (err) { msg.textContent = err.message; btn.disabled = false; }
 });
 

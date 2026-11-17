@@ -50,6 +50,9 @@ function copyApp(installPath) {
       if (rel === '') return true;
       const segments = rel.split(path.sep);
       if (segments[0] === 'installer') return false;
+      // A git clone's history isn't part of the app, and a copy that carries a .git folder gets
+      // treated as a developer checkout instead of an installed copy.
+      if (segments[0] === '.git') return false;
       if (segments.includes('.bin')) return false; // npm's .bin symlinks trip up fs.cpSync and aren't needed at runtime
       for (const name of preserve) {
         if (rel === name || rel.startsWith(`${name}${path.sep}`)) return false;

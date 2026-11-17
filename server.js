@@ -661,10 +661,32 @@ function recordVisitor(rawIp) {
 // restricted to the host machine for the same reason a stranger on the
 // network shouldn't be able to grant themselves an account.
 
+// Every address this computer itself has (Wi-Fi, Ethernet, hotspot...). Re-read now and then, since
+// a hotspot or cable can come and go while The Shelf runs.
+let ownAddressCache = { at: 0, set: new Set() };
+function ownAddresses() {
+  if (Date.now() - ownAddressCache.at > 15000) {
+    const set = new Set();
+    try {
+      for (const list of Object.values(os.networkInterfaces())) {
+        for (const a of list || []) if (a && a.address) set.add(String(a.address).toLowerCase().split('%')[0]);
+      }
+    } catch { /* no interface list: loopback still counts below */ }
+    ownAddressCache = { at: Date.now(), set };
+  }
+  return ownAddressCache.set;
+}
+
+// "Is this request coming from the computer The Shelf runs on?" A browser on the host that opens
+// The Shelf by its network address (http://192.168.1.250:8080 instead of http://localhost:8080)
+// reaches the server FROM that address, not from 127.0.0.1, so this computer's own addresses count
+// too. Without that, the host's own browser was treated as "another device": the local-only switch
+// and the update button never appeared, and with local-only on it would lock the host out. Another
+// device can't present one of this computer's own addresses as its source address.
 function isLocalRequest(req) {
   const raw = req.ip || (req.connection && req.connection.remoteAddress) || '';
-  const ip = raw.replace(/^::ffff:/, '');
-  return ip === '127.0.0.1' || ip === '::1';
+  const ip = raw.replace(/^::ffff:/, '').toLowerCase().split('%')[0];
+  return ip === '127.0.0.1' || ip === '::1' || ownAddresses().has(ip);
 }
 
 function loadUsers() {
@@ -4799,14 +4821,44 @@ app.all(/^\/api\/mesh(\/.*)?$/, async (req, res) => {
 // install (your shelves in shared/ and everything in data/ are never touched), installs any new
 // libraries, and restarts. Only from the computer The Shelf runs on.
 const UPDATE_REPO = 'hardwaremack-prog/the-shelf';
+// Where to ask GitHub. Only ever changed for testing (SHELF_GITHUB_API / SHELF_GITHUB_CODELOAD).
+const GITHUB_API = (process.env.SHELF_GITHUB_API || 'https://api.github.com').replace(/\/+$/, '');
+const GITHUB_CODELOAD = (process.env.SHELF_GITHUB_CODELOAD || 'https://codeload.github.com').replace(/\/+$/, '');
 const VERSION_FILE = path.join(__dirname, '.shelf-version.json');
 function installedVersion() { try { return JSON.parse(fs.readFileSync(VERSION_FILE, 'utf8')); } catch { return null; } }
+
+// Turns Node's terse "fetch failed" into something that says what is wrong and what to do.
+function describeFetchError(err) {
+  if (!err) return 'unknown error';
+  if (err.rateLimited) return err.message;
+  const cause = err.cause || {};
+  const code = String(cause.code || cause.message || '');
+  let hint = '';
+  if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY|ISSUER/i.test(code)) {
+    hint = " This network looks like it inspects secure connections (common on work networks), so The Shelf doesn't trust its certificate. Start The Shelf with the setting NODE_USE_SYSTEM_CA=1 (needs Node 22.15 or newer), or NODE_EXTRA_CA_CERTS pointing at your company's certificate file.";
+  } else if (/ENOTFOUND|EAI_AGAIN/.test(code)) {
+    hint = " This computer can't look up github.com: check that it is online.";
+  } else if (/ECONNREFUSED|ETIMEDOUT|ECONNRESET|UND_ERR_CONNECT_TIMEOUT|TimeoutError/i.test(code + ' ' + (err.name || ''))) {
+    hint = ' github.com may be blocked, or very slow, on this network.';
+  }
+  return `${err.message}${code ? ` (${code})` : ''}.${hint}`;
+}
+
 let latestCache = { at: 0, data: null };
 async function latestVersion(fresh) {
   if (!fresh && latestCache.data && Date.now() - latestCache.at < 5 * 60 * 1000) return latestCache.data;
-  const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/commits/main`, {
+  const r = await fetch(`${GITHUB_API}/repos/${UPDATE_REPO}/commits/main`, {
     headers: { 'User-Agent': 'TheShelf', Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(10000)
   });
+  if (r.status === 403 || r.status === 429) {
+    // GitHub lets one network address ask only a few dozen times an hour without signing in; an
+    // office, school or shared connection can use that up without anyone here having asked much.
+    const reset = Number(r.headers.get('x-ratelimit-reset'));
+    const when = reset ? ` Try again after ${new Date(reset * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : ' Try again in a little while.';
+    const e = new Error(`GitHub is limiting how often this network may check for updates.${when} (You can still use Update now.)`);
+    e.rateLimited = true;
+    throw e;
+  }
   if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
   const j = await r.json();
   const data = { sha: j.sha, date: j.commit && j.commit.committer && j.commit.committer.date, message: ((j.commit && j.commit.message) || '').split('\n')[0] };
@@ -4840,27 +4892,39 @@ app.get('/api/app/current', (req, res) => {
 });
 
 app.get('/api/app/version', async (req, res) => {
-  const current = installedVersion();
+  // A copy that carries a .git folder (for instance one installed from a git clone) is told apart
+  // only so the page can say so; it updates the same way as any other copy.
   const gitCheckout = fs.existsSync(path.join(__dirname, '.git'));
+  const current = installedVersion() || (gitCheckout ? gitCheckoutVersion() : null);
   let latest = null, error = null;
-  try { latest = await latestVersion(req.query.fresh === '1'); } catch (err) { error = `Couldn't reach GitHub (${err.message}).`; }
+  try { latest = await latestVersion(req.query.fresh === '1'); } catch (err) { error = err.rateLimited ? err.message : `Couldn't reach GitHub: ${describeFetchError(err)}`; }
   res.json({
-    current, latest, error, gitCheckout, canUpdate: isLocalRequest(req) && !gitCheckout,
+    current, latest, error, gitCheckout, canUpdate: isLocalRequest(req),
     upToDate: !!(current && latest && current.sha === latest.sha)
   });
 });
 
 app.post('/api/app/update', async (req, res) => {
   if (!isLocalRequest(req)) return res.status(403).json({ error: 'Updates can only be started on the computer The Shelf runs on.' });
-  if (fs.existsSync(path.join(__dirname, '.git'))) return res.status(400).json({ error: 'This copy is a git checkout: update it with git pull.' });
   if (updating) return res.status(409).json({ error: 'An update is already running.' });
   updating = true;
   try {
     latestCache = { at: 0, data: null };
-    const latest = await latestVersion();
-    const zr = await fetch(`https://codeload.github.com/${UPDATE_REPO}/zip/${latest.sha}`, { signal: AbortSignal.timeout(120000) });
-    if (!zr.ok) throw new Error(`download failed (${zr.status})`);
+    // Ask GitHub which version is newest. If that check is unavailable (rate limit, an API-only
+    // block), still update: download the main branch directly and read its commit id from the zip.
+    let latest = null;
+    try { latest = await latestVersion(true); } catch { /* fall back to the branch download below */ }
+    let zr;
+    try {
+      zr = await fetch(`${GITHUB_CODELOAD}/${UPDATE_REPO}/zip/${latest ? latest.sha : 'refs/heads/main'}`, { signal: AbortSignal.timeout(120000) });
+    } catch (err) { throw new Error(`couldn't download from GitHub: ${describeFetchError(err)}`); }
+    if (!zr.ok) throw new Error(`download failed (GitHub answered ${zr.status})`);
     const zip = new AdmZip(Buffer.from(await zr.arrayBuffer()));
+    if (!latest) {
+      // GitHub puts the commit id in the zip's comment.
+      const m = /[0-9a-f]{40}/i.exec(String(zip.getZipComment() || ''));
+      latest = { sha: m ? m[0].toLowerCase() : 'unknown', date: new Date().toISOString(), message: 'Newest version of main' };
+    }
     const before = ['package.json', 'package-lock.json'].map(f => { try { return fs.readFileSync(path.join(__dirname, f), 'utf8'); } catch { return ''; } });
     let written = 0;
     for (const e of zip.getEntries()) {
@@ -4897,7 +4961,7 @@ app.post('/api/app/update', async (req, res) => {
     }, 800);
   } catch (err) {
     updating = false;
-    if (!res.headersSent) res.status(500).json({ error: `Update failed: ${err.message}. Nothing was restarted.` });
+    if (!res.headersSent) res.status(500).json({ error: `Update failed: ${String(err.message).replace(/\.+$/, '')}. Nothing was restarted.` });
   }
 });
 
