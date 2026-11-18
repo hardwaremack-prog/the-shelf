@@ -1316,13 +1316,13 @@ const unlockSessions = new Map(); // token -> { expiresAt, epoch }
 const unlockFailures = new Map(); // ip -> { count, until }
 
 function loadLocks() {
-  const empty = { areas: [], salt: null, hash: null, epoch: 1 };
+  const empty = { areas: [], salt: null, hash: null, epoch: 1, enabled: true };
   if (!fs.existsSync(LOCKS_FILE)) return empty;
   try {
     const d = JSON.parse(fs.readFileSync(LOCKS_FILE, 'utf8'));
     return {
       areas: Array.isArray(d.areas) ? d.areas.filter(a => LOCK_AREA_BY_LOWER.has(String(a).toLowerCase())).map(a => LOCK_AREA_BY_LOWER.get(String(a).toLowerCase())) : [],
-      salt: d.salt || null, hash: d.hash || null, epoch: Number(d.epoch) || 1
+      salt: d.salt || null, hash: d.hash || null, epoch: Number(d.epoch) || 1, enabled: d.enabled !== false
     };
   } catch { return empty; }
 }
@@ -1331,7 +1331,7 @@ function saveLocks() { fs.writeFileSync(LOCKS_FILE, JSON.stringify(folderLocks))
 
 // Locks only mean anything once a password exists.
 function activeLockedAreas() {
-  return (folderLocks.hash && folderLocks.salt) ? new Set(folderLocks.areas.map(a => a.toLowerCase())) : new Set();
+  return (folderLocks.enabled && folderLocks.hash && folderLocks.salt) ? new Set(folderLocks.areas.map(a => a.toLowerCase())) : new Set();
 }
 
 function hasUnlocked(req) {
@@ -1432,6 +1432,7 @@ app.get('/api/locks/status', (req, res) => {
   res.json({
     isLocal: local,
     hasPassword: !!folderLocks.hash,
+    enabled: folderLocks.enabled,
     areas: LOCKABLE_AREAS,
     locked: LOCKABLE_AREAS.filter(a => locked.has(a.id.toLowerCase())).map(a => a.id),
     configured: local ? folderLocks.areas : undefined,
@@ -1485,6 +1486,11 @@ app.put('/api/locks/config', (req, res) => {
     }
     folderLocks.areas = clean;
   }
+  if (body.enabled !== undefined) {
+    const on = body.enabled === true;
+    if (on !== folderLocks.enabled) folderLocks.epoch += 1;
+    folderLocks.enabled = on;
+  }
   if (body.password !== undefined) {
     if (typeof body.password !== 'string' || body.password.length < 4) {
       return res.status(400).json({ error: 'Password must be at least 4 characters.' });
@@ -1497,7 +1503,7 @@ app.put('/api/locks/config', (req, res) => {
     return res.status(400).json({ error: 'Set a viewing password before locking folders.' });
   }
   saveLocks();
-  res.json({ ok: true, hasPassword: !!folderLocks.hash, configured: folderLocks.areas });
+  res.json({ ok: true, hasPassword: !!folderLocks.hash, enabled: folderLocks.enabled, configured: folderLocks.areas });
 });
 
 // Host: sign out everyone who has already unlocked, right now.
@@ -1512,7 +1518,7 @@ app.post('/api/locks/lock-everyone', (req, res) => {
 // Host: remove the password and all locks.
 app.delete('/api/locks', (req, res) => {
   if (!requireHost(req, res)) return;
-  folderLocks = { areas: [], salt: null, hash: null, epoch: folderLocks.epoch + 1 };
+  folderLocks = { areas: [], salt: null, hash: null, epoch: folderLocks.epoch + 1, enabled: true };
   unlockSessions.clear();
   saveLocks();
   res.json({ ok: true });

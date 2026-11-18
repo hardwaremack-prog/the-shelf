@@ -145,6 +145,28 @@
   function renderSidebar() {
     const group = document.querySelector('.power-toggle-group');
     if (!group) return;
+    let row = document.getElementById('lkToggleRow');
+    if (!row) {
+      const cb = h('input', { type: 'checkbox', id: 'lkToggle' });
+      row = h('div', { className: 'power-toggle', id: 'lkToggleRow' },
+        h('label', { className: 'toggle-switch' }, cb, h('span', { className: 'toggle-slider' })),
+        h('span', { id: 'lkToggleLabel' }));
+      group.appendChild(row);
+      cb.addEventListener('change', async () => {
+        const want = cb.checked;
+        if (want && (!status.hasPassword || !(status.configured || []).length)) {
+          cb.checked = false; showHostSettings(); return;
+        }
+        const r = await jpost('/api/locks/config', 'PUT', { enabled: want });
+        if (!r.ok) cb.checked = !want;
+        await refresh();
+      });
+    }
+    row.hidden = !status.isLocal;
+    if (status.isLocal) {
+      row.querySelector('input').checked = !!(status.enabled && status.hasPassword && (status.configured || []).length);
+      row.querySelector('#lkToggleLabel').textContent = row.querySelector('input').checked ? 'Read-only password: on' : 'Read-only password: off';
+    }
     let btn = document.getElementById('lkSideBtn');
     if (!btn) {
       btn = h('button', { id: 'lkSideBtn', className: 'lk-sidebtn' });
