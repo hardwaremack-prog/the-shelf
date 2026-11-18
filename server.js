@@ -743,6 +743,7 @@ function getSessionUser(req) {
 // demanded a write-access login.
 function isAuthExemptPath(reqPath) {
   if (reqPath.startsWith('/api/auth/login') || reqPath === '/api/auth/logout') return true;
+  if (reqPath === '/api/locks/unlock' || reqPath === '/api/locks/relock') return true;
   if (/^\/api\/files\/[^/]+\/[^/]+\/play$/.test(reqPath)) return true;
   if (reqPath.startsWith('/api/messaging/')) return true;
   return false;
@@ -1286,6 +1287,237 @@ app.use((req, res, next) => {
   return res.status(401).json({ error: 'Log in to view this Shelf.' });
 });
 
+// ---- Folder locks: a host-controlled, read-only viewing password ----
+//
+// The host picks which areas (shelves like Pictures, or tools like Docs)
+// are "locked" and sets one viewing password. Anyone other than the host
+// computer must enter it to see a locked area, and even then it is
+// strictly read-only: changing a locked area from another device is never
+// allowed -- only the host can. The host itself is never asked.
+//
+// The gate works on a normalised copy of the URL (decoded, backslashes
+// turned to slashes, lower-cased) because Windows treats folder names
+// case-insensitively and accepts either slash -- /shared/docs, /SHARED/Docs
+// and /shared\\docs must all land in the same place.
+
+const LOCKS_FILE = path.join(DATA_ROOT, 'folder-locks.json');
+const LOCKABLE_AREAS = [
+  ...CATEGORIES.map(c => ({ id: c, label: c, group: 'Shelves' })),
+  { id: 'notes', label: 'Notes', group: 'Tools' },
+  { id: 'documents', label: 'Docs', group: 'Tools' },
+  { id: 'sheets', label: 'Sheets', group: 'Tools' },
+  { id: 'presentations', label: 'Slides', group: 'Tools' },
+  { id: 'drawings', label: 'Draw', group: 'Tools' },
+  { id: 'messages', label: 'Messages', group: 'Tools' }
+];
+const LOCK_AREA_BY_LOWER = new Map(LOCKABLE_AREAS.map(a => [a.id.toLowerCase(), a.id]));
+const UNLOCK_DURATION_MS = 2 * 60 * 60 * 1000; // 2 hours
+const unlockSessions = new Map(); // token -> { expiresAt, epoch }
+const unlockFailures = new Map(); // ip -> { count, until }
+
+function loadLocks() {
+  const empty = { areas: [], salt: null, hash: null, epoch: 1 };
+  if (!fs.existsSync(LOCKS_FILE)) return empty;
+  try {
+    const d = JSON.parse(fs.readFileSync(LOCKS_FILE, 'utf8'));
+    return {
+      areas: Array.isArray(d.areas) ? d.areas.filter(a => LOCK_AREA_BY_LOWER.has(String(a).toLowerCase())).map(a => LOCK_AREA_BY_LOWER.get(String(a).toLowerCase())) : [],
+      salt: d.salt || null, hash: d.hash || null, epoch: Number(d.epoch) || 1
+    };
+  } catch { return empty; }
+}
+let folderLocks = loadLocks();
+function saveLocks() { fs.writeFileSync(LOCKS_FILE, JSON.stringify(folderLocks)); }
+
+// Locks only mean anything once a password exists.
+function activeLockedAreas() {
+  return (folderLocks.hash && folderLocks.salt) ? new Set(folderLocks.areas.map(a => a.toLowerCase())) : new Set();
+}
+
+function hasUnlocked(req) {
+  const token = getCookie(req, 'shelfUnlock');
+  if (!token) return false;
+  const s = unlockSessions.get(token);
+  if (!s || s.expiresAt < Date.now() || s.epoch !== folderLocks.epoch) { unlockSessions.delete(token); return false; }
+  return true;
+}
+
+function lockNormalize(p) {
+  let s = String(p || '');
+  try { s = decodeURIComponent(s); } catch { /* keep raw */ }
+  return path.posix.normalize('/' + s.replace(/\\/g, '/')).replace(/\/+/g, '/').toLowerCase();
+}
+
+// Which locked areas does this request touch? Returns a list of area ids
+// (lower-case). Empty = touches nothing lockable.
+function areasForRequest(req, locked) {
+  const found = new Set();
+  const p = lockNormalize(req.path);
+  const seg = p.split('/').filter(Boolean);
+  const add = (id) => { if (id && locked.has(id)) found.add(id); };
+  const anyShelf = () => { for (const c of CATEGORIES) add(c.toLowerCase()); };
+
+  if (seg[0] === 'shared') add(seg[1]);
+  else if (seg[0] === 'api') {
+    if (seg[1] === 'files') {
+      if (seg[2] === 'move') { /* body-based, handled below */ }
+      else if (seg[2]) add(seg[2]);
+    } else if (['notes', 'documents', 'sheets', 'presentations', 'drawings'].includes(seg[1])) add(seg[1]);
+    else if (seg[1] === 'messaging' && (seg[2] === 'conversations')) add('messages');
+    else if (seg[1] === 'messaging' && seg[2] === 'send') add('messages');
+    else if (seg[1] === 'backup') { if (locked.size) found.add('*backup'); }
+  } else if (seg[0] === 'data-files') {
+    if (seg[1] === 'drawings') add('drawings');
+    else if (seg[1] === 'album-art') add('music');
+    else if (seg[1] === 'video-thumbs') add('videos');
+    else if (seg[1] === 'file-thumbs') anyShelf();
+  } else if (seg[0] === 'play') {
+    // /play/<md5 of "Category/name"> -- recover which shelf from the hash.
+    const id = seg[1];
+    if (id) {
+      for (const c of CATEGORIES) {
+        if (!locked.has(c.toLowerCase())) continue;
+        let names = [];
+        try { names = fs.readdirSync(path.join(SHARED_ROOT, c)); } catch { /* none */ }
+        if (names.some(n => extractionId(c, n) === id)) found.add(c.toLowerCase());
+      }
+      // An id we can't place: when any shelf is locked, don't guess.
+      if (!found.size && CATEGORIES.some(c => locked.has(c.toLowerCase()))) {
+        let known = false;
+        for (const c of CATEGORIES) {
+          let names = [];
+          try { names = fs.readdirSync(path.join(SHARED_ROOT, c)); } catch { /* none */ }
+          if (names.some(n => extractionId(c, n) === id)) { known = true; break; }
+        }
+        if (!known) anyShelf();
+      }
+    }
+  }
+
+  // Anything naming a category in the query string or JSON body.
+  const cands = [req.query && req.query.category, req.query && req.query.fromCategory, req.query && req.query.toCategory];
+  if (req.body && typeof req.body === 'object') cands.push(req.body.category, req.body.fromCategory, req.body.toCategory);
+  for (const c of cands) if (typeof c === 'string') add(lockNormalize(c).replace(/^\//, ''));
+  return [...found];
+}
+
+app.use((req, res, next) => {
+  if (isLocalRequest(req)) return next();
+  if (req.path.startsWith('/api/locks/')) return next();
+  const locked = activeLockedAreas();
+  if (!locked.size) return next();
+  const areas = areasForRequest(req, locked);
+  if (!areas.length) return next();
+  const isWrite = WRITE_METHODS.has(req.method);
+  if (areas.includes('*backup')) {
+    return res.status(403).json({ error: 'Backups are host-only while folder locks are on.', hostOnly: true });
+  }
+  if (isWrite) {
+    return res.status(403).json({ error: 'This folder is locked and read-only -- only the host computer can change it.', locked: true, readOnly: true, areas });
+  }
+  if (hasUnlocked(req)) return next();
+  return res.status(403).json({ error: 'This folder is locked. Enter the viewing password to open it.', locked: true, areas });
+});
+
+// Uploads are multipart, so the target shelf is only known after the body
+// is parsed -- checked inside the upload handler as well.
+function uploadBlockedByLock(req, category) {
+  if (isLocalRequest(req)) return false;
+  return activeLockedAreas().has(String(category || '').toLowerCase());
+}
+
+app.get('/api/locks/status', (req, res) => {
+  const local = isLocalRequest(req);
+  const locked = activeLockedAreas();
+  res.json({
+    isLocal: local,
+    hasPassword: !!folderLocks.hash,
+    areas: LOCKABLE_AREAS,
+    locked: LOCKABLE_AREAS.filter(a => locked.has(a.id.toLowerCase())).map(a => a.id),
+    configured: local ? folderLocks.areas : undefined,
+    unlocked: local || hasUnlocked(req)
+  });
+});
+
+app.post('/api/locks/unlock', (req, res) => {
+  const ip = String(req.ip || '');
+  const f = unlockFailures.get(ip);
+  if (f && f.until > Date.now()) {
+    return res.status(429).json({ error: `Too many wrong tries. Wait ${Math.ceil((f.until - Date.now()) / 1000)} seconds.` });
+  }
+  const pw = req.body && typeof req.body.password === 'string' ? req.body.password : '';
+  if (!folderLocks.hash || !verifyPassword(pw, folderLocks.salt, folderLocks.hash)) {
+    const n = ((f && f.count) || 0) + 1;
+    unlockFailures.set(ip, { count: n, until: n >= 5 ? Date.now() + 60 * 1000 : 0 });
+    return res.status(401).json({ error: 'Wrong password.' });
+  }
+  unlockFailures.delete(ip);
+  const token = crypto.randomBytes(32).toString('hex');
+  unlockSessions.set(token, { expiresAt: Date.now() + UNLOCK_DURATION_MS, epoch: folderLocks.epoch });
+  res.setHeader('Set-Cookie', `shelfUnlock=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(UNLOCK_DURATION_MS / 1000)}; SameSite=Lax`);
+  res.json({ ok: true });
+});
+
+app.post('/api/locks/relock', (req, res) => {
+  const token = getCookie(req, 'shelfUnlock');
+  if (token) unlockSessions.delete(token);
+  res.setHeader('Set-Cookie', 'shelfUnlock=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax');
+  res.json({ ok: true });
+});
+
+function requireHost(req, res) {
+  if (isLocalRequest(req)) return true;
+  res.status(403).json({ error: 'Only the host computer can change folder locks.' });
+  return false;
+}
+
+// Host: choose locked areas and (optionally) set/replace the password.
+app.put('/api/locks/config', (req, res) => {
+  if (!requireHost(req, res)) return;
+  const body = req.body || {};
+  if (body.areas !== undefined) {
+    if (!Array.isArray(body.areas)) return res.status(400).json({ error: 'areas must be a list.' });
+    const clean = [];
+    for (const a of body.areas) {
+      const id = LOCK_AREA_BY_LOWER.get(String(a).toLowerCase());
+      if (!id) return res.status(400).json({ error: `Unknown area: ${a}` });
+      if (!clean.includes(id)) clean.push(id);
+    }
+    folderLocks.areas = clean;
+  }
+  if (body.password !== undefined) {
+    if (typeof body.password !== 'string' || body.password.length < 4) {
+      return res.status(400).json({ error: 'Password must be at least 4 characters.' });
+    }
+    folderLocks.salt = crypto.randomBytes(16).toString('hex');
+    folderLocks.hash = hashPassword(body.password, folderLocks.salt);
+    folderLocks.epoch += 1; // a new password signs everyone out of locked areas
+  }
+  if (folderLocks.areas.length && !folderLocks.hash) {
+    return res.status(400).json({ error: 'Set a viewing password before locking folders.' });
+  }
+  saveLocks();
+  res.json({ ok: true, hasPassword: !!folderLocks.hash, configured: folderLocks.areas });
+});
+
+// Host: sign out everyone who has already unlocked, right now.
+app.post('/api/locks/lock-everyone', (req, res) => {
+  if (!requireHost(req, res)) return;
+  folderLocks.epoch += 1;
+  unlockSessions.clear();
+  saveLocks();
+  res.json({ ok: true });
+});
+
+// Host: remove the password and all locks.
+app.delete('/api/locks', (req, res) => {
+  if (!requireHost(req, res)) return;
+  folderLocks = { areas: [], salt: null, hash: null, epoch: folderLocks.epoch + 1 };
+  unlockSessions.clear();
+  saveLocks();
+  res.json({ ok: true });
+});
+
 // ---- Auth endpoints ----
 
 app.get('/api/auth/status', (req, res) => {
@@ -1501,6 +1733,9 @@ const storage = multer.diskStorage({
     const cat = req.body.category;
     if (!isValidCategory(cat)) {
       return cb(new Error('Invalid category'));
+    }
+    if (uploadBlockedByLock(req, cat)) {
+      return cb(new Error('This folder is locked and read-only -- only the host computer can add to it.'));
     }
     cb(null, path.join(SHARED_ROOT, cat));
   },
