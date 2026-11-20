@@ -4052,6 +4052,7 @@ function renderPortal(cats) {
           <input type="text" id="linkUrl" placeholder="http://192.168.1.1" required>
           <button type="submit">Add link</button>
         </form>
+        <div class="oled-sim" id="oledSimMount"></div>
       </div>
     </div>
 
@@ -4070,6 +4071,7 @@ function renderPortal(cats) {
     </div>
   `;
 
+  if (window.shelfOledMount) window.shelfOledMount(el('#oledSimMount'));   // the boards' little screen, simulated
   content.querySelectorAll('.remove-sticky').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();

@@ -3467,3 +3467,10 @@ img.sticky-media { cursor: pointer; touch-action: manipulation; }
 .sidebar-version:empty, .about-version:empty { display: none; }
 .about-version { color: var(--text-muted); font-size: 13px; margin: 8px 0 0; }
 .version-sha { font-family: ui-monospace, Consolas, monospace; }
+
+/* The boards' little screen, simulated on Home (oled-sim.js) */
+.oled-sim { margin-top: 18px; }
+.oled-sim:empty { display: none; }
+.oled-sim-canvas { display: block; width: 100%; max-width: 384px; aspect-ratio: 2 / 1; image-rendering: pixelated;
+  background: #05080f; border: 10px solid #15171c; border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,.35); cursor: pointer; }
+.oled-sim-cap { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
