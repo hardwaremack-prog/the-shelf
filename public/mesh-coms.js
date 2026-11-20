@@ -1,11 +1,11 @@
-// The Shelf - Mesh Coms: the text mesh between Shelf boards (Heltec V3/V4 on 900 MHz LoRa and
+// The Shelf - Meshed Comms: the text mesh between Shelf boards (Heltec V3/V4 on 900 MHz LoRa and
 // 2.4 GHz, plain ESP32 boards on 2.4 GHz), joined through a board on the same network. The
 // computer can't send those radio frames itself, so the server passes /api/mesh/... on to the
 // board's own Coms (see server.js). Same screen as the boards' Coms tab.
 (function () {
   let timer = null, last = '', drafting = false;
   const LEVEL_NAMES = ['Low', 'Normal', 'High'];
-  const BAND_NAME = 'Mesh Coms';
+  const BAND_NAME = 'Meshed Comms';
   const API = '/api/mesh';
   let gw = null;                                   // the board this goes through
   const NOLORA = false;
@@ -239,7 +239,7 @@
     const cands = (gw && gw.candidates) || [];
     content.innerHTML = `<div class="coms"><div class="coms-card coms-off">
         <b>No Shelf board to go through.</b><br>${escapeHtml(err || '')}<br><br>
-        Mesh Coms on a computer goes through a Heltec or ESP32 board running The Shelf on the same Wi-Fi (the board does the radio part).
+        Meshed Comms on a computer goes through a Heltec or ESP32 board running The Shelf on the same Wi-Fi (the board does the radio part).
         ${cands.length ? `<div style="margin-top:10px">Boards this Shelf has met:</div>${cands.map(b => `<button class="coms-chip coms-gw-pick" data-ip="${escapeHtml(b.ip)}">${escapeHtml(b.name)} &middot; ${escapeHtml(b.ip)}</button>`).join(' ')}` : ''}
         <form id="meshGwForm" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><input id="meshGwIp" placeholder="Board's address, e.g. 10.0.0.126" style="flex:1;min-width:180px"><button class="coms-btn" type="submit">Use this board</button></form>
       </div></div>`;

@@ -63,7 +63,7 @@ const TOOLS = [
   { key: 'visitors', label: 'Visitors', color: 'var(--cat-Videos)' },
   { key: 'bigfiles', label: 'Big Transfer', color: 'var(--coral)' },
   { key: 'ai', label: 'AI', color: 'var(--cat-Books)' },
-  { key: 'mesh', label: 'Mesh Coms', color: '#E2725B' },
+  { key: 'mesh', label: 'Meshed Comms', color: '#E2725B' },
   { key: 'tidysuite', label: 'Tidy Suite', color: '#3FA796' }
 ];
 const TOOL_LABELS = Object.fromEntries(TOOLS.map(t => [t.key, t.label]));
