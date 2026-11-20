@@ -1,4 +1,5 @@
-// The Shelf boards' little screen, simulated on the Home page (under Quick links).
+// The Shelf boards' little screen, simulated on the Home page (under Quick links). On a computer it
+// shows this computer; on a board (handy when it has no screen of its own) it shows the board.
 //
 // The same pages the ESP32 and Heltec boards show on their 128x64 OLED, drawn pixel for pixel
 // with the boards' own fonts (oled-sim-data.js, made from the firmware): this computer's
@@ -99,13 +100,50 @@
   const ampm = d => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
   const plain = s => String(s || '').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/…/g, '...').replace(/[^\x20-\x7e°·]/g, '');
 
-  // this computer
+  // this computer, or the board this page comes from (a board without a screen of its own)
   const info = { host: location.hostname || 'this computer', ip: '', peers: 0 };
+  let board = null;                                  // /api/board/info, on a board
   function loadInfo() {
+    fetch('/api/board/info', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(j => { if (j && j.board) board = j; }).catch(() => {});
     fetch('/api/network-info').then(r => r.json()).then(j => { info.ip = (j.ips && j.ips[0]) || ''; info.port = j.port; }).catch(() => {});
     fetch('/api/messaging/peers').then(r => r.json()).then(j => { info.peers = Array.isArray(j) ? j.length : (j.peers || []).length; }).catch(() => {});
   }
+  const fmtShort = b => b >= 1e9 ? (b / 1e9).toFixed(1) + 'GB' : b >= 1e6 ? (b / 1e6).toFixed(1) + 'MB' : Math.round(b / 1e3) + 'KB';
+  function drawBoardStatus() {                       // as the board's own screen draws it
+    const b = board, short = String(b.board).replace(/^Heltec /, '');
+    setFont('helvB08'); drawStr(0, 9, 'THE SHELF');
+    let x = strWidth('THE SHELF') + 3;
+    setFont('f5x7'); drawStr(x, 9, short); x += strWidth(short) + 4;
+    drawStr(x, 9, b.storage === 'microSD card' ? 'SD' : 'FLASH');
+    setFont('f4x6'); drawStr(128 - strWidth('USB'), 8, 'USB');
+    hline(0, 12, 128);
+    setFont('f6x10');
+    let l1, l2, bottom;
+    if (b.ssid) { l1 = b.host + '.local'; l2 = `Wi-Fi ${b.rssi} dBm`; bottom = 'IP ' + b.ip; }
+    else if (b.ap) { l1 = 'WiFi ' + b.apName; l2 = b.apOpen ? 'Open network' : 'Password: ' + (b.apPass || ''); bottom = 'IP ' + b.ip; }
+    else { l1 = 'Connecting Wi-Fi...'; l2 = b.homeSsid || ''; bottom = b.board + ' v' + b.fw; }
+    if (strWidth(l1) > 128) setFont('f5x7');
+    drawStr(0, 24, l1); setFont('f6x10'); drawStr(0, 35, l2);
+    if (b.total) {
+      frame(0, 39, 64, 7); box(1, 40, Math.floor(b.used * 62 / b.total), 5);
+      setFont('f5x7'); const fr = fmtShort(b.total - b.used) + ' free'; drawStr(128 - strWidth(fr), 46, fr);
+    }
+    setFont('f6x10'); drawStr(0, 62, bottom);
+  }
+  function drawTemp() {                              // the board's CPU temperature
+    const c = board.temp;
+    header('CPU TEMPERATURE');
+    rframe(8, 13, 9, 26, 4); circle(12, 41, 6); disc(12, 41, 4);
+    color = 0; box(9, 35, 7, 4); color = 1;
+    const lvl = Math.max(2, Math.min(20, Math.floor((c - 20) * 20 / 70))); box(10, 37 - lvl, 5, lvl + 3);
+    setFont('helvB18'); drawStr(30, 36, Math.round(c) + '\u00b0C');
+    setFont('helvB10'); const f = Math.round(c * 9 / 5 + 32) + '\u00b0F'; drawStr(128 - strWidth(f), 36, f);
+    const up = Math.floor(board.uptime / 60), u = up >= 1440 ? `Up ${Math.floor(up / 1440)}d ${Math.floor(up % 1440 / 60)}h` : `Up ${Math.floor(up / 60)}h ${up % 60}m`;
+    setFont('f5x7'); drawStr((128 - strWidth(u)) >> 1, 55, u);
+    const m = `${Math.floor(board.heap / 1024)} KB free \u00b7 ${board.cpuMhz || 240} MHz`; drawStr((128 - strWidth(m)) >> 1, 63, m);
+  }
   function drawStatus() {
+    if (board) { drawBoardStatus(); return; }
     setFont('helvB08'); drawStr(0, 9, 'THE SHELF');
     let x = strWidth('THE SHELF') + 3;
     setFont('f5x7'); drawStr(x, 9, 'PC');
@@ -212,6 +250,7 @@
   const getJ = u => fetch(u, { cache: 'no-store' }).then(r => { if (!r.ok) throw r.status; return r.json(); });
   async function locate() {
     if (wx.lat != null) return true;
+    try { const b = await getJ('/api/board/location'); if (b && b.lat != null) { wx.lat = b.lat; wx.lon = b.lon; return true; } } catch (e) {}
     const pos = await new Promise(res => {
       if (!navigator.geolocation || !window.isSecureContext) return res(null);
       navigator.geolocation.getCurrentPosition(p => res(p.coords), () => res(null), { timeout: 8000, maximumAge: 3600000 });
@@ -310,13 +349,14 @@
   }
 
   // ---- the carousel
-  const P = { STATUS: 0, WATCH: 1, NOW: 2, EARTH: 3, AFFIRM: 4, CLOCK: 5, WX: 6, COLOR: 7 }, COUNT = 8;
+  const P = { STATUS: 0, WATCH: 1, NOW: 2, EARTH: 3, AFFIRM: 4, CLOCK: 5, WX: 6, COLOR: 7, TEMP: 8 }, COUNT = 9;
   let page = P.STATUS, pageAt = 0, pageLen = 10000, held = false, noteAt = 0;
-  const ready = p => p === P.NOW ? npRecent() && np.name : p === P.COLOR ? !!dayColor() : p === P.AFFIRM ? !!affirmation() : true;
+  const ready = p => p === P.NOW ? npRecent() && np.name : p === P.COLOR ? !!dayColor() : p === P.AFFIRM ? !!affirmation() : p === P.TEMP ? !!(board && board.temp != null) : true;
   function duration(p) {
     switch (p) {
       case P.STATUS: return 10000; case P.WATCH: return 9000; case P.CLOCK: return 6000; case P.NOW: return 10000;
       case P.EARTH: case P.WX: return 9000;
+      case P.TEMP: return 6000;
       case P.AFFIRM: setFont('helvB12'); return Math.max(7000, passMs(strWidth(affirmation())));
       case P.COLOR: { setFont('f6x10'); const c = dayColor(); return Math.max(7000, passMs(strWidth(plain(c && c.meaning)))); }
     }
@@ -333,7 +373,7 @@
       pageAt = now; pageLen = duration(page);
     }
     const el = now - pageAt;
-    [drawStatus, drawWatch, () => drawNow(el), drawEarth, () => drawAffirm(el), drawClock, drawWx, () => drawColor(el)][page]();
+    [drawStatus, drawWatch, () => drawNow(el), drawEarth, () => drawAffirm(el), drawClock, drawWx, () => drawColor(el), drawTemp][page]();
     if (noteAt && now - noteAt < 1500) {
       const t = held ? 'Holding this page' : 'Pages turning';
       setFont('f6x10'); const w = strWidth(t) + 8, x = (128 - w) >> 1;
@@ -380,5 +420,5 @@
     lastDraw = 0;
     if (!timer) tick();
   };
-  setInterval(() => { if (cv && cv.isConnected) { loadInfo(); if (Date.now() - wx.at > 30 * 60000) loadWx(); } }, 5 * 60000);
+  setInterval(() => { if (cv && cv.isConnected) { loadInfo(); if (Date.now() - wx.at > 30 * 60000) loadWx(); } }, 60000);
 })();
