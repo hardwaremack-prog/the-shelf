@@ -206,6 +206,7 @@
   }
 
   refresh();
+  window.shelfLocksRefresh = refresh;   // for anything that changes who the host is (a board's admin unlock)
   // markNav only touches the DOM when something needs to change, so
   // watching the nav can't feed back on itself.
   ['shelfNav', 'toolNav'].forEach(id => {
