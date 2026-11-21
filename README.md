@@ -30,7 +30,8 @@ subscriptions, no ads, and nothing uploaded anywhere — your files never leave 
 - 🗜️ **Insane compression, built in** — music and photos are shrunk in your browser as you upload them.
   A 3.8 MB MP3 becomes a 1.4 MB **Opus** file (62% smaller, title, artist and album art kept); a ~3.5 MB phone photo,
   iPhone HEIC included, becomes a ~250 KB **AVIF** (about 93% smaller, 2048 px). Untick *Shrink music and photos first*
-  in the upload box to keep originals. The encoders ship in `public/vendor/shrink/`, so it works offline:
+  in the upload box to keep originals. Already have a big library? The **Shrink…** button on the Music and Pictures
+  shelves shrinks what's there: tick the files you want, and choose whether to remove the originals once the small copies are saved. The encoders ship in `public/vendor/shrink/`, so it works offline:
   libopus from [opus-recorder](https://github.com/chris-rudmin/opus-recorder) (Chrome's built-in WebCodecs Opus
   encoder is used when the page is on localhost/https), [jSquash AVIF](https://github.com/jamsinclair/jSquash) (Apache-2.0),
   and [heic-to](https://github.com/hoppergee/heic-to) (LGPL, libheif) for iPhone photos.

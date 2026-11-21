@@ -109,6 +109,7 @@
         <button class="tool-action-btn" id="imagineBtn" hidden title="Describe a picture and Pollinations.ai draws it">Create with AI</button>
         <div class="header-tool-actions">
           <button class="tool-action-btn" id="standardizeNamesBtn" hidden title="Clean up messy auto-downloaded filenames">Standardize names</button>
+          <button class="tool-action-btn" id="shrinkShelfBtn" hidden title="Shrink songs to Opus and photos to AVIF, to free up space">Shrink&hellip;</button>
           <button class="tool-action-btn" id="fetchArtBtn" hidden title="Look up cover art for tracks that don't have it yet">Get album art</button>
           <button class="tool-action-btn tool-action-btn-secondary" id="clearArtBtn" hidden title="Delete all cached album art so it can be re-fetched">Clear album art</button>
           <button class="tool-action-btn tool-action-btn-secondary" id="exportListBtn" hidden title="Download the whole library as a zip, or the song list as a spreadsheet">Export&hellip;</button>
@@ -188,6 +189,29 @@
     <div class="backup-footer">
       <span class="backup-total" id="backupTotal"></span>
       <button class="tool-action-btn" id="backupDownloadBtn">Download backup</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shrink what's already on the Music or Pictures shelf -->
+<div class="modal-backdrop" id="shrinkBackdrop" hidden>
+  <div class="modal backup-modal shrink-modal">
+    <div class="modal-head">
+      <h3 id="shrinkTitle">Shrink music</h3>
+      <button class="icon-btn" id="closeShrinkBtn" aria-label="Close">&times;</button>
+    </div>
+    <p class="shrink-intro" id="shrinkIntro"></p>
+    <div class="backup-select-row">
+      <button class="link-btn" id="shrinkSelectAll">Select all</button>
+      <button class="link-btn" id="shrinkSelectNone">Select none</button>
+      <span class="shrink-count" id="shrinkCount"></span>
+    </div>
+    <div class="shrink-list" id="shrinkList"></div>
+    <label class="shrink-opt"><input type="checkbox" id="shrinkRemoveOrig" checked>
+      <span><strong>Remove the originals</strong> once each shrunk copy is safely saved (frees the space). Untick to keep both.</span></label>
+    <div class="backup-footer">
+      <span class="backup-total" id="shrinkTotal"></span>
+      <button class="tool-action-btn" id="shrinkGoBtn">Shrink selected</button>
     </div>
   </div>
 </div>

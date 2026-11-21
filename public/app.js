@@ -422,6 +422,7 @@ function renderHeader() {
   el('#aboutInfoBtn').hidden = state.category !== 'Games' && state.category !== 'Programs';
   el('#standardizeNamesBtn').hidden = (state.category !== 'Music' && state.category !== 'Videos') || n === 0;
   el('#fetchArtBtn').hidden = state.category !== 'Music' || n === 0;
+  el('#shrinkShelfBtn').hidden = !(typeof shrinkAudio === 'function') || (state.category !== 'Music' && state.category !== 'Pictures') || n === 0;
   el('#clearArtBtn').hidden = state.category !== 'Music' || !state.files.some(f => f.artUrl);
   el('#exportListBtn').hidden = !EXPORT_CATEGORIES.includes(state.category) || state.files.length === 0;
   if (EXPORT_CATEGORIES.includes(state.category)) {
@@ -456,6 +457,7 @@ function setToolHeader(title, sub, actionLabel, onAction) {
   el('#aboutInfoBtn').hidden = true;
   el('#standardizeNamesBtn').hidden = true;
   el('#fetchArtBtn').hidden = true;
+  el('#shrinkShelfBtn').hidden = true;
   el('#clearArtBtn').hidden = true;
   el('#exportListBtn').hidden = true;
   el('#fetchThumbsBtn').hidden = true;
@@ -3630,6 +3632,84 @@ if (el('#shrinkToggle')) {
   el('#shrinkToggle').checked = shrinkOn();
   el('#shrinkToggle').addEventListener('change', e => { try { localStorage.setItem('shelf.shrink', e.target.checked ? 'on' : 'off'); } catch {} });
 }
+
+// ---------- Shrink what's already on the shelf ----------
+// Music -> Opus 48 kbps (tags and cover kept), Pictures -> AVIF 2048 px. Each file is fetched, shrunk in this
+// browser, uploaded back to the same shelf, and (if ticked) the original is deleted only after the new copy is saved.
+function shrinkCandidates(cat) {
+  return state.files.filter(f => cat === 'Music'
+    ? /\.(mp3|wav|m4a|aac|flac|ogg|oga|wma|aif|aiff)$/i.test(f.name) && !/\.opus$/i.test(f.name)
+    : /\.(jpe?g|png|webp|heic|heif|bmp)$/i.test(f.name));
+}
+let shrinkBusy = false;
+function shrinkRefreshTotal() {
+  const boxes = [...document.querySelectorAll('#shrinkList input[type=checkbox]')];
+  const sel = boxes.filter(b => b.checked);
+  const bytes = sel.reduce((a, b) => a + Number(b.dataset.size || 0), 0);
+  el('#shrinkCount').textContent = `${sel.length} of ${boxes.length} selected`;
+  el('#shrinkTotal').textContent = sel.length ? `${shrinkSize(bytes)} selected` : '';
+  el('#shrinkGoBtn').disabled = shrinkBusy || !sel.length;
+}
+function openShrinkModal() {
+  const cat = state.category, files = shrinkCandidates(cat);
+  el('#shrinkTitle').textContent = cat === 'Music' ? 'Shrink music' : 'Shrink pictures';
+  el('#shrinkIntro').textContent = cat === 'Music'
+    ? 'Songs become Opus at 48 kbps: about 60% smaller, sounding about the same, with title, artist, album and cover art kept.'
+    : 'Photos become AVIF, 2048 px on the longer side: often 90% smaller or more, still sharp on a laptop or TV. iPhone HEIC photos too.';
+  el('#shrinkList').innerHTML = files.length
+    ? files.map((f, i) => `<label class="shrink-row"><input type="checkbox" checked data-i="${i}" data-size="${f.size}"><span class="shrink-name">${escapeHtml(f.name)}</span><span class="shrink-st">${shrinkSize(f.size)}</span></label>`).join('')
+    : `<p class="shrink-intro">Nothing here to shrink: ${cat === 'Music' ? 'every song is already Opus' : 'every photo is already small (AVIF, GIF or SVG)'}.</p>`;
+  el('#shrinkList').onchange = shrinkRefreshTotal;
+  el('#shrinkList')._files = files;
+  shrinkRefreshTotal();
+  el('#shrinkBackdrop').hidden = false;
+}
+async function runShelfShrink() {
+  const cat = state.category, files = el('#shrinkList')._files || [], removeOrig = el('#shrinkRemoveOrig').checked;
+  const rows = [...document.querySelectorAll('#shrinkList .shrink-row')].filter(r => r.querySelector('input').checked);
+  if (!rows.length) return;
+  shrinkBusy = true; shrinkRefreshTotal();
+  document.querySelectorAll('#shrinkList input').forEach(b => { b.disabled = true; });
+  let before = 0, after = 0, done = 0, failed = 0;
+  for (const row of rows) {
+    const f = files[Number(row.querySelector('input').dataset.i)], st = row.querySelector('.shrink-st');
+    try {
+      st.textContent = 'reading…';
+      const blob = await (await fetch(f.url)).blob();
+      const file = new File([blob], f.name, { type: blob.type });
+      st.textContent = 'shrinking…';
+      const out = cat === 'Music'
+        ? await shrinkAudio(file, p => { st.textContent = `shrinking ${p}%`; })
+        : await shrinkPhoto(file, 'avif', 2048);
+      if (out === file || out.size >= file.size) { st.textContent = 'already small: left as it is'; continue; }
+      st.textContent = 'saving…';
+      const form = new FormData(); form.append('category', cat); form.append('files', out);
+      const res = await fetch('/api/upload', { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'could not save');
+      if (removeOrig) {
+        const del = await fetch(`/api/files/${encodeURIComponent(cat)}/${encodeURIComponent(f.name)}`, { method: 'DELETE' });
+        if (!del.ok) throw new Error('shrunk copy saved, but the original could not be removed');
+      }
+      before += file.size; after += out.size; done++;
+      st.innerHTML = `${shrinkSize(file.size)} → ${shrinkSize(out.size)} <b class="ok">${Math.round(100 - out.size * 100 / file.size)}% smaller</b>`;
+      el('#shrinkTotal').textContent = `${done} shrunk: ${shrinkSize(before)} → ${shrinkSize(after)}` + (removeOrig ? `, ${shrinkSize(before - after)} freed` : '');
+    } catch (e) {
+      failed++; st.innerHTML = `<span class="err">${escapeHtml(e.message || 'failed')}</span>`;
+    }
+  }
+  shrinkBusy = false;
+  el('#shrinkGoBtn').disabled = true;
+  el('#shrinkTotal').textContent = done
+    ? `Done: ${done} shrunk, ${shrinkSize(before)} → ${shrinkSize(after)}` + (removeOrig ? ` (${shrinkSize(before - after)} freed)` : ' (originals kept)') + (failed ? `, ${failed} failed` : '')
+    : (failed ? `${failed} couldn't be shrunk` : 'Nothing needed shrinking');
+  loadCategories(); loadFiles();
+}
+el('#shrinkShelfBtn').addEventListener('click', openShrinkModal);
+el('#closeShrinkBtn').addEventListener('click', () => { if (!shrinkBusy) el('#shrinkBackdrop').hidden = true; });
+el('#shrinkSelectAll').addEventListener('click', () => { if (shrinkBusy) return; document.querySelectorAll('#shrinkList input').forEach(b => { b.checked = true; }); shrinkRefreshTotal(); });
+el('#shrinkSelectNone').addEventListener('click', () => { if (shrinkBusy) return; document.querySelectorAll('#shrinkList input').forEach(b => { b.checked = false; }); shrinkRefreshTotal(); });
+el('#shrinkGoBtn').addEventListener('click', runShelfShrink);
 
 // ---------- Master power toggle ----------
 

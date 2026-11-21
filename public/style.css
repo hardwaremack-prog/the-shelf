@@ -3480,3 +3480,14 @@ img.sticky-media { cursor: pointer; touch-action: manipulation; }
 .oled-sim-canvas { display: block; width: 100%; max-width: 384px; aspect-ratio: 2 / 1; image-rendering: pixelated;
   background: #05080f; border: 10px solid #15171c; border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,.35); cursor: pointer; }
 .oled-sim-cap { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+
+/* ---------- Shrink (Music / Pictures shelves) ---------- */
+.shrink-intro { font-size: 13px; color: var(--text-muted); margin: 0 0 10px; }
+.shrink-count { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+.shrink-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.shrink-row { display: flex; align-items: center; gap: 10px; font-size: 13px; background: var(--surface); padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+.shrink-row input { accent-color: var(--accent); }
+.shrink-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shrink-st { flex-shrink: 0; color: var(--text-muted); text-align: right; }
+.shrink-st .ok { color: var(--mint); }
+.shrink-st .err { color: var(--coral); }
