@@ -2848,7 +2848,54 @@ app.post('/api/files/:category/remove-duplicates', async (req, res) => {
     }
   }
 
-  res.json({ removed, removedCount: removed.length, groupsFound, total: files.length });
+  // (an AVIF file starts with an ISO 'ftyp' box naming avif/avis, and a real photo is more than a few bytes)
+  const isRealAvif = f => {
+    try {
+      const fd = fs.openSync(f, 'r'), b = Buffer.alloc(12); fs.readSync(fd, b, 0, 12, 0); fs.closeSync(fd);
+      return fs.statSync(f).size > 1024 && b.toString('latin1', 4, 8) === 'ftyp' && /^avi[fs]$/.test(b.toString('latin1', 8, 12));
+    } catch { return false; }
+  };
+  // Shrunk copies: on Music, an MP3 (or WAV, M4A, FLAC...) that has an .opus file with the same name and the same
+  // length (within 2 seconds) goes, and the small Opus copy stays; on Pictures, a JPEG/PNG/HEIC that has an .avif of
+  // the same name goes. Only when the browser asked for it (req.body.shrunk), since it's a different kind of match.
+  const shrunkRemoved = [];
+  let shrunkFreed = 0;
+  if (req.body && req.body.shrunk && (category === 'Music' || category === 'Pictures')) {
+    const left = fs.readdirSync(dir).filter(f => !f.startsWith('.'));
+    const small = category === 'Music' ? 'opus' : 'avif';
+    const bigExt = category === 'Music' ? new Set(['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'])
+                                        : new Set(['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp', 'bmp']);
+    const stem = n => path.basename(n, path.extname(n)).replace(/ \(\d+\)$/, '').trim().toLowerCase();
+    const smallByStem = {};
+    for (const n of left) if (extOf(n) === small) (smallByStem[stem(n)] ||= []).push(n);
+    const lengthOf = n => {
+      let f;
+      try { f = TagLib.File.createFromPath(path.join(dir, n)); return f.properties ? f.properties.durationMilliseconds : 0; }
+      catch { return 0; } finally { if (f) f.dispose(); }
+    };
+    for (const n of left) {
+      if (!bigExt.has(extOf(n))) continue;
+      const twins = smallByStem[stem(n)];
+      if (!twins) continue;
+      if (category === 'Music') {
+        const len = lengthOf(n);
+        if (!len || !twins.some(t => Math.abs(lengthOf(t) - len) <= 2000)) continue;   // not the same song: leave it
+      } else if (!twins.some(t => isRealAvif(path.join(dir, t)))) continue;              // an empty or broken .avif: keep the photo
+
+      try {
+        const size = fs.statSync(path.join(dir, n)).size;
+        fs.unlinkSync(path.join(dir, n));
+        removeExtractionCache(category, n);
+        migratePlayCount(category, n, null, null);
+        migrateAlbumArt(category, n, null, null);
+        migrateFileThumb(category, n, null, null);
+        migrateLockedName(category, n, null, null);
+        shrunkRemoved.push(n); shrunkFreed += size;
+      } catch { /* in use or already gone */ }
+    }
+  }
+
+  res.json({ removed, removedCount: removed.length, groupsFound, total: files.length, shrunkRemoved, shrunkRemovedCount: shrunkRemoved.length, shrunkFreed });
 });
 
 // Apple's free iTunes Search API has an informal, undocumented rate limit

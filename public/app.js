@@ -880,12 +880,20 @@ async function removeDuplicates() {
   btn.disabled = true;
   btn.textContent = 'Checking for duplicates\u2026';
   try {
-    const res = await fetch(`/api/files/${state.category}/remove-duplicates`, { method: 'POST' });
+    const music = state.category === 'Music', pics = state.category === 'Pictures';
+    const shrunk = (music || pics) && confirm(music
+      ? 'Also remove MP3s (and other big copies) that already have a shrunk Opus copy? It keeps the .opus file, and only removes a song whose Opus copy has the same name and the same length. Cancel keeps them.'
+      : 'Also remove photos that already have a shrunk AVIF copy with the same name? It keeps the .avif file. Cancel keeps them.');
+    const res = await fetch(`/api/files/${state.category}/remove-duplicates`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shrunk }),
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not check for duplicates.');
-    alert(data.removedCount === 0
-      ? 'No duplicates found — everything here is unique.'
-      : `Removed ${data.removedCount} duplicate file${data.removedCount === 1 ? '' : 's'} across ${data.groupsFound} group${data.groupsFound === 1 ? '' : 's'}.`);
+    const parts = [];
+    if (data.removedCount) parts.push(`Removed ${data.removedCount} duplicate file${data.removedCount === 1 ? '' : 's'} across ${data.groupsFound} group${data.groupsFound === 1 ? '' : 's'}.`);
+    if (data.shrunkRemovedCount) parts.push(`Removed ${data.shrunkRemovedCount} ${music ? 'song' : 'photo'}${data.shrunkRemovedCount === 1 ? '' : 's'} that already had a shrunk ${music ? 'Opus' : 'AVIF'} copy, freeing ${shrinkSize(data.shrunkFreed)}.`);
+    else if (shrunk) parts.push(`No ${music ? 'songs' : 'photos'} with a shrunk copy to remove.`);
+    alert(parts.length ? parts.join('\n\n') : 'No duplicates found — everything here is unique.');
     loadFiles();
   } catch (err) {
     alert(err.message);
