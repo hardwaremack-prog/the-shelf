@@ -311,6 +311,31 @@
     const f = `lo ${Math.round(lo)}°  hi ${Math.round(hi)}°  - - freezing`; drawStr((128 - strWidth(f)) >> 1, 63, f);
   }
 
+  // the top 6 news headlines (NPR, or BBC News), fetched by the browser every 30 minutes
+  const news = { titles: [], src: '', at: 0 };
+  async function loadNews() {
+    for (const [u, name] of [['https://feeds.npr.org/1001/rss.xml', 'NPR'], ['https://feeds.bbci.co.uk/news/rss.xml', 'BBC News']]) {
+      try {
+        const j = await getJ('https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(u));
+        if (j.status !== 'ok' || !j.items || !j.items.length) continue;
+        news.titles = j.items.slice(0, 6).map(x => plain(x.title).replace(/&amp;/g, '&')).filter(Boolean); news.src = name; news.at = Date.now();
+        return;
+      } catch (e) {}
+    }
+    news.at = Date.now() - 25 * 60000;              // try again in 5 minutes
+  }
+  const headlineMs = t => { setFont('helvB12'); return Math.max(4500, passMs(strWidth(t))); };
+  function drawNews(el) {
+    const n = news.titles.length; if (!n) return;
+    let i = 0, start = 0;
+    while (i < n - 1 && el - start >= headlineMs(news.titles[i])) { start += headlineMs(news.titles[i]); i++; }
+    header(`NEWS \u00b7 ${i + 1} OF ${n}`);
+    setFont('helvB12'); drawPass(36, news.titles[i], el - start);
+    scrolling = true;
+    setFont('f5x7'); drawStr(0, 62, news.src);
+    for (let k = 0; k < n; k++) { const x = 128 - (n - k) * 8 + 3; if (k === i) disc(x, 58, 2); else circle(x, 58, 2); }
+  }
+
   // the sunlit earth
   const WORLD = window.OLED_WORLD;
   function sunPos(d) {
@@ -349,14 +374,15 @@
   }
 
   // ---- the carousel
-  const P = { STATUS: 0, WATCH: 1, NOW: 2, EARTH: 3, AFFIRM: 4, CLOCK: 5, WX: 6, COLOR: 7, TEMP: 8 }, COUNT = 9;
+  const P = { STATUS: 0, WATCH: 1, NOW: 2, EARTH: 3, AFFIRM: 4, CLOCK: 5, WX: 6, COLOR: 7, TEMP: 8, NEWS: 9 }, COUNT = 10;
   let page = P.STATUS, pageAt = 0, pageLen = 10000, held = false, noteAt = 0;
-  const ready = p => p === P.NOW ? npRecent() && np.name : p === P.COLOR ? !!dayColor() : p === P.AFFIRM ? !!affirmation() : p === P.TEMP ? !!(board && board.temp != null) : true;
+  const ready = p => p === P.NOW ? npRecent() && np.name : p === P.COLOR ? !!dayColor() : p === P.AFFIRM ? !!affirmation() : p === P.TEMP ? !!(board && board.temp != null) : p === P.NEWS ? news.titles.length > 0 : true;
   function duration(p) {
     switch (p) {
       case P.STATUS: return 10000; case P.WATCH: return 9000; case P.CLOCK: return 6000; case P.NOW: return 10000;
       case P.EARTH: case P.WX: return 9000;
       case P.TEMP: return 6000;
+      case P.NEWS: return news.titles.reduce((a, t) => a + headlineMs(t), 0) || 6000;
       case P.AFFIRM: setFont('helvB12'); return Math.max(7000, passMs(strWidth(affirmation())));
       case P.COLOR: { setFont('f6x10'); const c = dayColor(); return Math.max(7000, passMs(strWidth(plain(c && c.meaning)))); }
     }
@@ -373,7 +399,7 @@
       pageAt = now; pageLen = duration(page);
     }
     const el = now - pageAt;
-    [drawStatus, drawWatch, () => drawNow(el), drawEarth, () => drawAffirm(el), drawClock, drawWx, () => drawColor(el), drawTemp][page]();
+    [drawStatus, drawWatch, () => drawNow(el), drawEarth, () => drawAffirm(el), drawClock, drawWx, () => drawColor(el), drawTemp, () => drawNews(el)][page]();
     if (noteAt && now - noteAt < 1500) {
       const t = held ? 'Holding this page' : 'Pages turning';
       setFont('f6x10'); const w = strWidth(t) + 8, x = (128 - w) >> 1;
@@ -417,8 +443,9 @@
     });
     loadInfo();
     if (!wx.at || Date.now() - wx.at > 30 * 60000) loadWx();
+    if (!news.at || Date.now() - news.at > 30 * 60000) loadNews();
     lastDraw = 0;
     if (!timer) tick();
   };
-  setInterval(() => { if (cv && cv.isConnected) { loadInfo(); if (Date.now() - wx.at > 30 * 60000) loadWx(); } }, 60000);
+  setInterval(() => { if (cv && cv.isConnected) { loadInfo(); if (Date.now() - wx.at > 30 * 60000) loadWx(); if (Date.now() - news.at > 30 * 60000) loadNews(); } }, 60000);
 })();
