@@ -311,6 +311,50 @@
     const f = `lo ${Math.round(lo)}°  hi ${Math.round(hi)}°  - - freezing`; drawStr((128 - strWidth(f)) >> 1, 63, f);
   }
 
+  // GPS: a Heltec V4 with the GPS kit switched on (its /api/gps), or, on a computer, this browser's
+  // own location (when the browser shares it: the computer's own Shelf, or https)
+  const gps = { src: '', fix: false, lat: 0, lon: 0, altM: null, kmh: null, sats: 0, view: 0, acc: null, talking: false, at: 0 };
+  let gpsWatch = null;
+  function loadGps() {
+    if (board && board.gps) {
+      fetch('/api/gps', { cache: 'no-store' }).then(r => r.json()).then(g => {
+        if (!g.supported || !g.running) { gps.src = ''; return; }
+        Object.assign(gps, { src: 'kit', fix: g.fix, lat: g.lat, lon: g.lon, altM: g.altM, kmh: g.kmh, sats: g.sats, view: g.view, talking: g.talking, at: Date.now() });
+      }).catch(() => {});
+    } else if (!board && !gpsWatch && navigator.geolocation && window.isSecureContext) {
+      gpsWatch = navigator.geolocation.watchPosition(p => {
+        const c = p.coords;
+        Object.assign(gps, { src: 'browser', fix: true, lat: c.latitude, lon: c.longitude, altM: c.altitude, kmh: c.speed != null ? c.speed * 3.6 : null, acc: c.accuracy, at: Date.now() });
+      }, () => {}, { enableHighAccuracy: true, maximumAge: 30000, timeout: 30000 });
+    }
+  }
+  function gridSq(lat, lon) {
+    const x = lon + 180, y = lat + 90, A = 65, a = 97;
+    return String.fromCharCode(A + Math.floor(x / 20), A + Math.floor(y / 10)) + Math.floor(x / 2 % 10) + Math.floor(y % 10) +
+      String.fromCharCode(a + Math.floor(x * 12 % 24), a + Math.floor(y * 24 % 24));
+  }
+  function drawGps() {
+    if (!gps.fix) {
+      header('GPS');
+      setFont('f6x10');
+      if (!gps.talking) { drawPass(30, 'No word from the GPS', 0); setFont('f5x7'); drawPass(44, 'Is the GPS kit plugged in?', 0); return; }
+      drawPass(30, 'Looking for satellites', 0);
+      setFont('f5x7'); const v = `${gps.view} in view`; drawStr((128 - strWidth(v)) >> 1, 44, v);
+      const t = 'Best outdoors, sky in view'; drawStr((128 - strWidth(t)) >> 1, 62, t);
+      const a = (Date.now() % 2000) / 2000 * 2 * Math.PI; circle(118, 22, 6); line(118, 22, 118 + Math.round(Math.sin(a) * 6), 22 - Math.round(Math.cos(a) * 6));
+      scrolling = true; return;
+    }
+    header(gps.src === 'kit' ? `GPS · ${gps.sats} SATS` : `LOCATION · ±${Math.round(gps.acc || 0)} M`);
+    setFont('f6x10');
+    drawStr(0, 22, `${gps.lat >= 0 ? 'N' : 'S'} ${Math.abs(gps.lat).toFixed(5)}`);
+    drawStr(0, 33, `${gps.lon >= 0 ? 'E' : 'W'} ${Math.abs(gps.lon).toFixed(5)}`);
+    setFont('f5x7');
+    const al = gps.altM != null ? `${Math.round(gps.altM * 3.28084)} ft` : 'alt --', sp = gps.kmh != null ? `${Math.round(gps.kmh * 0.621371)} mph` : '-- mph';
+    drawStr(128 - strWidth(al), 22, al); drawStr(128 - strWidth(sp), 33, sp);
+    setFont('helvB10'); const g = 'Grid ' + gridSq(gps.lat, gps.lon); drawStr((128 - strWidth(g)) >> 1, 58, g);
+    for (let i = 0; i < Math.min(gps.sats, 24); i++) disc(4 + i * 5, 42, 1);
+  }
+
   // the top 6 news headlines (NPR, or BBC News), fetched by the browser every 30 minutes
   const news = { titles: [], src: '', at: 0 };
   async function loadNews() {
@@ -362,8 +406,9 @@
     const sx = Math.round((sub + 180) * 128 / 360), sy = Math.round((WORLD.top - decl * 180 / Math.PI) * 64 / span);
     color = 0; disc(sx, sy, 6); color = 1; disc(sx, sy, 2);
     for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; line(sx + Math.round(Math.cos(a) * 4), sy + Math.round(Math.sin(a) * 4), sx + Math.round(Math.cos(a) * 6), sy + Math.round(Math.sin(a) * 6)); }
-    if (wx.lat != null) {
-      const hx = Math.round((wx.lon + 180) * 128 / 360), hy = Math.round((WORLD.top - wx.lat) * 64 / span);
+    const hl = gps.fix ? gps.lat : wx.lat, ho = gps.fix ? gps.lon : wx.lon;
+    if (hl != null) {
+      const hx = Math.round((ho + 180) * 128 / 360), hy = Math.round((WORLD.top - hl) * 64 / span);
       color = 0; disc(hx, hy, 4); color = 1;
       if (Math.floor(Date.now() / 400) % 2) circle(hx, hy, 3); else disc(hx, hy, 2);
       px(hx, hy);
@@ -374,14 +419,15 @@
   }
 
   // ---- the carousel
-  const P = { STATUS: 0, WATCH: 1, NOW: 2, EARTH: 3, AFFIRM: 4, CLOCK: 5, WX: 6, COLOR: 7, TEMP: 8, NEWS: 9 }, COUNT = 10;
+  const P = { STATUS: 0, WATCH: 1, NOW: 2, EARTH: 3, AFFIRM: 4, CLOCK: 5, WX: 6, COLOR: 7, TEMP: 8, NEWS: 9, GPS: 10 }, COUNT = 11;
   let page = P.STATUS, pageAt = 0, pageLen = 10000, held = false, noteAt = 0;
-  const ready = p => p === P.NOW ? npRecent() && np.name : p === P.COLOR ? !!dayColor() : p === P.AFFIRM ? !!affirmation() : p === P.TEMP ? !!(board && board.temp != null) : p === P.NEWS ? news.titles.length > 0 : true;
+  const ready = p => p === P.NOW ? npRecent() && np.name : p === P.COLOR ? !!dayColor() : p === P.AFFIRM ? !!affirmation() : p === P.TEMP ? !!(board && board.temp != null) : p === P.NEWS ? news.titles.length > 0 : p === P.GPS ? !!gps.src && Date.now() - gps.at < 60000 : true;
   function duration(p) {
     switch (p) {
       case P.STATUS: return 10000; case P.WATCH: return 9000; case P.CLOCK: return 6000; case P.NOW: return 10000;
       case P.EARTH: case P.WX: return 9000;
       case P.TEMP: return 6000;
+      case P.GPS: return 9000;
       case P.NEWS: return news.titles.reduce((a, t) => a + headlineMs(t), 0) || 6000;
       case P.AFFIRM: setFont('helvB12'); return Math.max(7000, passMs(strWidth(affirmation())));
       case P.COLOR: { setFont('f6x10'); const c = dayColor(); return Math.max(7000, passMs(strWidth(plain(c && c.meaning)))); }
@@ -399,7 +445,7 @@
       pageAt = now; pageLen = duration(page);
     }
     const el = now - pageAt;
-    [drawStatus, drawWatch, () => drawNow(el), drawEarth, () => drawAffirm(el), drawClock, drawWx, () => drawColor(el), drawTemp, () => drawNews(el)][page]();
+    [drawStatus, drawWatch, () => drawNow(el), drawEarth, () => drawAffirm(el), drawClock, drawWx, () => drawColor(el), drawTemp, () => drawNews(el), drawGps][page]();
     if (noteAt && now - noteAt < 1500) {
       const t = held ? 'Holding this page' : 'Pages turning';
       setFont('f6x10'); const w = strWidth(t) + 8, x = (128 - w) >> 1;
@@ -444,8 +490,10 @@
     loadInfo();
     if (!wx.at || Date.now() - wx.at > 30 * 60000) loadWx();
     if (!news.at || Date.now() - news.at > 30 * 60000) loadNews();
+    setTimeout(loadGps, 1500);
     lastDraw = 0;
     if (!timer) tick();
   };
   setInterval(() => { if (cv && cv.isConnected) { loadInfo(); if (Date.now() - wx.at > 30 * 60000) loadWx(); if (Date.now() - news.at > 30 * 60000) loadNews(); } }, 60000);
+  setInterval(() => { if (cv && cv.isConnected) loadGps(); }, 3000);
 })();
