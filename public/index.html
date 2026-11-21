@@ -237,6 +237,11 @@
       <input type="file" id="fileInput" multiple hidden>
     </div>
 
+    <label class="shrink-opt"><input type="checkbox" id="shrinkToggle" checked>
+      <span><strong>Shrink music and photos first</strong> &mdash; songs become Opus (about 60% smaller, album art kept),
+      photos become AVIF (often 90%+ smaller). Done right here in your browser.</span></label>
+    <p class="shrink-saved" id="shrinkSaved"></p>
+
     <ul class="upload-list" id="uploadList"></ul>
   </div>
 
@@ -477,6 +482,8 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
   }
 </script>
+<script src="shrink/shrink.js"></script>
+<script src="shrink/photo.js"></script>
 <script src="app.js"></script>
 <script src="locks.js"></script>
 <script src="oled-sim-data.js"></script>

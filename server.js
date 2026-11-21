@@ -15,6 +15,8 @@ const XLSX = require('xlsx');
 const TagLib = require('node-taglib-sharp');
 
 const app = express();
+// Types the static server doesn't know by itself: shrunk music (.opus) and photos (.avif), and iPhone HEIC.
+try { express.static.mime.define({ 'audio/ogg': ['opus'], 'image/avif': ['avif'], 'image/heic': ['heic', 'heif'] }, true); } catch { /* older/newer express: browsers sniff these anyway */ }
 const PORT = process.env.PORT || 8080;
 
 const SHARED_ROOT = path.join(__dirname, 'shared');
@@ -119,8 +121,8 @@ function extOf(filename) {
   return path.extname(filename).slice(1).toLowerCase();
 }
 
-const PICTURE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic']);
-const MUSIC_EXT = new Set(['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac']);
+const PICTURE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif', 'avif']);
+const MUSIC_EXT = new Set(['mp3', 'wav', 'ogg', 'opus', 'flac', 'm4a', 'aac']);
 const MIDI_EXT = new Set(['mid', 'midi', 'kar', 'rmi']);   // the MIDI shelf; played by public/midi.js
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v', 'ogv', '3gp']);
 const PDF_EXT = new Set(['pdf']);
@@ -1707,7 +1709,7 @@ app.use('/play', express.static(EXTRACT_ROOT, { dotfiles: 'deny' }));
 // carry script, which would run as this site.
 const PUBLIC_DATA_DIRS = new Set(['album-art', 'video-thumbs', 'file-thumbs', 'drawings', 'portal-media', 'imagine']);
 const PUBLIC_DATA_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.bmp',
-  '.mp4', '.webm', '.mov', '.m4v', '.ogv', '.mp3', '.m4a', '.ogg', '.wav']);
+  '.mp4', '.webm', '.mov', '.m4v', '.ogv', '.mp3', '.m4a', '.ogg', '.opus', '.wav']);
 app.use('/data-files', (req, res, next) => {
   const parts = req.path.split('/').filter(Boolean);
   if (parts.length < 2 || !PUBLIC_DATA_DIRS.has(parts[0]) || !PUBLIC_DATA_EXTS.has(path.extname(req.path).toLowerCase())) {
@@ -3199,9 +3201,35 @@ app.post('/api/upload', (req, res) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
+    if (req.body && req.body.category === 'Music') {
+      for (const f of (req.files || [])) saveEmbeddedArt(f.filename);
+    }
     res.json({ uploaded: (req.files || []).map(f => f.filename) });
   });
 });
+
+// A song uploaded with its own cover inside (an MP3's ID3 picture, or the picture the shrinker carries into
+// an .opus file) shows that cover straight away, without fetching art online. A cover already on file wins.
+function saveEmbeddedArt(filename) {
+  let file;
+  try {
+    const map = loadAlbumArtMap();
+    const key = albumArtKey('Music', filename);
+    if (map[key]) return;
+    file = TagLib.File.createFromPath(path.join(SHARED_ROOT, 'Music', filename));
+    const pic = (file.tag.pictures || []).find(p => p && p.data && p.data.length > 100);
+    if (!pic) return;
+    const type = String(pic.mimeType || '').toLowerCase();
+    const ext = type.includes('png') ? '.png' : type.includes('webp') ? '.webp' : '.jpg';
+    const artFilename = crypto.randomBytes(12).toString('hex') + ext;
+    fs.mkdirSync(ALBUM_ART_DIR, { recursive: true });
+    fs.writeFileSync(path.join(ALBUM_ART_DIR, artFilename), Buffer.from(pic.data.toByteArray()));
+    map[key] = artFilename;
+    saveAlbumArtMap(map);
+  } catch { /* no tag, or one taglib can't read: the "Get album art" button still works */ } finally {
+    if (file) file.dispose();
+  }
+}
 
 app.delete('/api/files/:category/:name', (req, res) => {
   const { category, name } = req.params;

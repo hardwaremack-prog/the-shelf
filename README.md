@@ -27,6 +27,13 @@ subscriptions, no ads, and nothing uploaded anywhere — your files never leave 
   that plays your own music in the background. Put it on the TV and let it run.
 - 🎵 **Your own music service, minus the monthly bill** — album art, shuffle, play counts, "most played,"
   and a live music visualizer with six styles you can blow up to full screen.
+- 🗜️ **Insane compression, built in** — music and photos are shrunk in your browser as you upload them.
+  A 3.8 MB MP3 becomes a 1.4 MB **Opus** file (62% smaller, title, artist and album art kept); a ~3.5 MB phone photo,
+  iPhone HEIC included, becomes a ~250 KB **AVIF** (about 93% smaller, 2048 px). Untick *Shrink music and photos first*
+  in the upload box to keep originals. The encoders ship in `public/vendor/shrink/`, so it works offline:
+  libopus from [opus-recorder](https://github.com/chris-rudmin/opus-recorder) (Chrome's built-in WebCodecs Opus
+  encoder is used when the page is on localhost/https), [jSquash AVIF](https://github.com/jamsinclair/jSquash) (Apache-2.0),
+  and [heic-to](https://github.com/hoppergee/heic-to) (LGPL, libheif) for iPhone photos.
 - 🎬 **Movies and videos** — click and watch from any device in the house.
 - 🎮 **A game shelf** — browser games play instantly; programs and installers are one
   click to download onto any computer.

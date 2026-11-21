@@ -996,6 +996,12 @@ button, select, input {
 
 .upload-list .status.ok { color: var(--mint); }
 .upload-list .status.err { color: var(--coral); }
+.upload-list .status { text-align: right; flex-shrink: 0; max-width: 55%; }
+.shrink-opt { display: flex; gap: 10px; align-items: flex-start; margin-top: 14px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
+.shrink-opt input { margin-top: 3px; accent-color: var(--accent); }
+.shrink-opt strong { color: var(--text); }
+.shrink-saved { margin: 6px 0 0; font-size: 12px; color: var(--mint); }
+.shrink-saved:empty { display: none; }
 
 /* ---------- Big Transfer upload card ---------- */
 

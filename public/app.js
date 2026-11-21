@@ -3570,15 +3570,34 @@ async function uploadFiles(fileList, category) {
     li.innerHTML = `<span>${escapeHtml(file.name)}</span><span class="status">uploading&hellip;</span>`;
     list.appendChild(li);
 
+    let send = file;
+    const st = li.querySelector('.status');
+    const kind = shrinkKind(file, category);
+    if (kind) {
+      try {
+        st.textContent = 'shrinking\u2026';
+        send = kind === 'music'
+          ? await shrinkAudio(file, p => { st.textContent = `shrinking ${p}%\u2026`; })
+          : await shrinkPhoto(file, 'avif', 2048);
+      } catch (e) { send = file; }            // couldn't shrink it here: send it as it is
+      if (send !== file) {
+        li.querySelector('span').textContent = `${file.name} \u2192 ${send.name}`;
+        shrinkSaved += file.size - send.size;
+      }
+      st.textContent = 'uploading\u2026';
+    }
+
     const form = new FormData();
     form.append('category', category);
-    form.append('files', file);
+    form.append('files', send);
 
     try {
       const res = await fetch('/api/upload', { method: 'POST', body: form });
       const data = await res.json();
       if (res.ok) {
-        li.querySelector('.status').textContent = 'done';
+        li.querySelector('.status').textContent = send !== file
+          ? `done \u2014 ${shrinkSize(file.size)} \u2192 ${shrinkSize(send.size)} (${Math.round(100 - send.size * 100 / file.size)}% smaller)`
+          : 'done';
         li.querySelector('.status').classList.add('ok');
       } else {
         throw new Error(data.error || 'failed');
@@ -3589,8 +3608,27 @@ async function uploadFiles(fileList, category) {
     }
   }
 
+  if (shrinkSaved > 0) el('#shrinkSaved').textContent = `Shrinking has saved ${shrinkSize(shrinkSaved)} so far.`;
   loadCategories();
   if (category === state.category) loadFiles();
+}
+
+// ---------- Shrinking music and photos before they're uploaded ----------
+// Music becomes Opus at 48 kbps (about a third of an MP3's size, sounding the same to most ears; artist, title
+// and album art carried across); photos become AVIF, 2048 px on the longer side (iPhone HEIC photos too).
+// Done in this browser (public/shrink/), so The Shelf only ever stores the small copy. A checkbox turns it off.
+let shrinkSaved = 0;
+function shrinkOn() { try { return localStorage.getItem('shelf.shrink') !== 'off'; } catch { return true; } }
+function shrinkKind(file, category) {
+  if (!shrinkOn() || typeof shrinkAudio !== 'function') return null;
+  if (category === 'Music' && canShrink(file)) return 'music';
+  if (category === 'Pictures' && isPhoto(file) && !/\.(gif|svg|avif)$/i.test(file.name)) return 'photo';
+  return null;
+}
+function shrinkSize(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+if (el('#shrinkToggle')) {
+  el('#shrinkToggle').checked = shrinkOn();
+  el('#shrinkToggle').addEventListener('change', e => { try { localStorage.setItem('shelf.shrink', e.target.checked ? 'on' : 'off'); } catch {} });
 }
 
 // ---------- Master power toggle ----------

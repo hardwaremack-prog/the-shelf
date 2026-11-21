@@ -263,6 +263,9 @@ const SECTIONS = {
     sub: "The family home screen &mdash; hover anything with a dotted underline",
     html: `
       <p class="hint">This is a guided tour of The Shelf. Click any shelf or tool on the left, and hover (or tap) anything underlined to see what it does.</p>
+      <h3 class="sp-head" style="margin:18px 0 4px;">Make room: insane compression, built in</h3>
+      <p class="hint" style="margin-top:0;">Music and photos are shrunk in your browser as they're uploaded. Here's the before and after.</p>
+      <div id="shrinkPromo" data-where="on your Shelf"></div>
       <div class="dashboard-grid">
         <div class="tile hot tip-t underline" data-tip="A new one picked automatically every day from about 110 &mdash; works offline, nothing to maintain.">
           <h3>Today's affirmation</h3>
@@ -302,6 +305,10 @@ const SECTIONS = {
   'Pictures': {
     sub: 'A photo grid with a slideshow, an editor, and AI pictures',
     html: `
+      <h3 class="sp-head" style="margin:18px 0 4px;">Make room: insane compression, built in</h3>
+      <p class="hint" style="margin-top:0;">Music and photos are shrunk in your browser as they're uploaded. Here's the before and after.</p>
+      <div id="shrinkPromo" data-where="on your Shelf"></div>
+
       <div class="btn-row">
         <button class="pill-btn hot tip-b underline" data-tip="Auto-advances with a slow Ken Burns pan/zoom (or turn that off). If Music has songs, it shuffles them in the background, with volume and skip right in the slideshow. Real browser fullscreen &mdash; great on a TV.">Start slideshow</button>
         <button class="pill-btn hot tip-b underline" data-tip="Describe a picture and Pollinations.ai draws it &mdash; square, wide or tall. Like it? 'Yes, add to Pictures.' Not quite? 'No, try another.'">Create with AI</button>
@@ -324,6 +331,10 @@ const SECTIONS = {
   'Music': {
     sub: 'Your own music service, minus the monthly bill',
     html: `
+      <h3 class="sp-head" style="margin:18px 0 4px;">Make room: insane compression, built in</h3>
+      <p class="hint" style="margin-top:0;">Music and photos are shrunk in your browser as they're uploaded. Here's the before and after.</p>
+      <div id="shrinkPromo" data-where="on your Shelf"></div>
+
       <div class="btn-row">
         <button class="pill-btn hot tip-b underline" data-tip="Turns shuffle on and starts from a random song. The mini player has its own shuffle button too.">Shuffle play</button>
         <button class="pill-btn ghost hot tip-b underline" data-tip="Looks up real cover art from Apple's iTunes catalog and saves it into the file's own tag &mdash; MP3, WAV, OGG, FLAC, M4A, AAC. Only fills in what's missing.">Get album art</button>
@@ -573,6 +584,7 @@ function render(key){
   document.getElementById('secSub').innerHTML = s.sub;
   document.getElementById('content').innerHTML = s.html;
   wireTooltips(document.getElementById('content'));
+  if (window.mountShrinkPromo) mountShrinkPromo();
   window.scrollTo(0,0);
 }
 
@@ -598,5 +610,9 @@ const startEl = [...document.querySelectorAll('.shelf-nav .shelf-item, .tool-nav
 startEl.classList.add('active');
 render(SECTIONS[start] ? start : 'Home');
 </script>
+<script src="shrink/shrink.js"></script>
+<script src="shrink/photo.js"></script>
+<script src="shrink/zip.js"></script>
+<script src="shrink/promo.js"></script>
 </body>
 </html>
