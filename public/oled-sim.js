@@ -368,16 +368,15 @@
     }
     news.at = Date.now() - 25 * 60000;              // try again in 5 minutes
   }
-  const headlineMs = t => { setFont('helvB12'); return Math.max(4500, passMs(strWidth(t))); };
+  // one line, like a news ticker: all six headlines one after another, round and round
+  const tickerText = () => news.titles.join('   \u00b7   ');
+  const tickerMs = () => { setFont('helvB12'); return 1500 + (strWidth(tickerText()) + 40) * 1000 / SCROLL; };
   function drawNews(el) {
-    const n = news.titles.length; if (!n) return;
-    let i = 0, start = 0;
-    while (i < n - 1 && el - start >= headlineMs(news.titles[i])) { start += headlineMs(news.titles[i]); i++; }
-    header(`NEWS \u00b7 ${i + 1} OF ${n}`);
-    setFont('helvB12'); drawPass(36, news.titles[i], el - start);
+    if (!news.titles.length) return;
+    header(`NEWS \u00b7 ${news.src.toUpperCase()}`);
+    setFont('helvB12'); drawLoop(36, tickerText(), el);
     scrolling = true;
-    setFont('f5x7'); drawStr(0, 62, news.src);
-    for (let k = 0; k < n; k++) { const x = 128 - (n - k) * 8 + 3; if (k === i) disc(x, 58, 2); else circle(x, 58, 2); }
+    setFont('f5x7'); const t = `Top ${news.titles.length} headlines`; drawStr((128 - strWidth(t)) >> 1, 62, t);
   }
 
   // the sunlit earth
@@ -428,7 +427,7 @@
       case P.EARTH: case P.WX: return 9000;
       case P.TEMP: return 6000;
       case P.GPS: return 9000;
-      case P.NEWS: return news.titles.reduce((a, t) => a + headlineMs(t), 0) || 6000;
+      case P.NEWS: return news.titles.length ? tickerMs() : 6000;
       case P.AFFIRM: setFont('helvB12'); return Math.max(7000, passMs(strWidth(affirmation())));
       case P.COLOR: { setFont('f6x10'); const c = dayColor(); return Math.max(7000, passMs(strWidth(plain(c && c.meaning)))); }
     }
