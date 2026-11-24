@@ -21,7 +21,17 @@ const PORT = process.env.PORT || 8080;
 
 const SHARED_ROOT = path.join(__dirname, 'shared');
 // Sidebar order: Books / PDFs at the top, Pictures at the bottom.
-const CATEGORIES = ['Books', 'Music', 'MIDI', 'Videos', 'Games', 'Programs', 'Pictures'];
+const CATEGORIES = ['Books', 'Music', 'Opus', 'MIDI', 'Videos', 'Games', 'Programs', 'Pictures'];
+// 'Opus' is the "Music (Opus)" shelf: shrunk songs (.opus) live there, ordinary MP3s etc. on Music.
+// Both are music shelves: artists, album art, the player.
+const isSongShelf = c => c === 'Music' || c === 'Opus';
+// an .opus song headed for Music goes on the Opus shelf instead
+const shelfFor = (cat, name) => {
+  const opus = /\.opus$/i.test(String(name || ''));
+  if (cat === 'Music' && opus) return 'Opus';
+  if (cat === 'Opus' && !opus && MUSIC_EXT.has(extOf(String(name || '')))) return 'Music';   // an MP3 dropped on the Opus shelf
+  return cat;
+};
 
 // Where zipped HTML games get unzipped to, so they can be played in-browser.
 // Lives inside shared/ but starts with a dot, so it's invisible to the
@@ -1745,11 +1755,11 @@ const storage = multer.diskStorage({
     if (uploadBlockedByLock(req, cat)) {
       return cb(new Error('This folder is locked and read-only -- only the host computer can add to it.'));
     }
-    cb(null, path.join(SHARED_ROOT, cat));
+    cb(null, path.join(SHARED_ROOT, shelfFor(cat, file.originalname)));
   },
   filename: (req, file, cb) => {
     let name = sanitizeFilename(file.originalname);
-    const dest = path.join(SHARED_ROOT, req.body.category);
+    const dest = path.join(SHARED_ROOT, shelfFor(req.body.category, file.originalname));
     // avoid overwriting existing files with the same name
     let finalName = name;
     let counter = 1;
@@ -1788,7 +1798,7 @@ app.get('/api/files', (req, res) => {
   // Each lookup file is read once for the whole list, not once per item --
   // that was a few hundred reads of the same files per listing.
   const counts = loadPlayCounts();
-  const artMap = cat === 'Music' ? loadAlbumArtMap() : null;
+  const artMap = isSongShelf(cat) ? loadAlbumArtMap() : null;
   const videoThumbs = cat === 'Videos' ? loadVideoThumbMap() : null;
   const fileThumbs = THUMBNAILABLE_CATEGORIES.includes(cat) ? loadFileThumbMap() : null;
   const key = (f) => `${cat}/${f}`;
@@ -1807,7 +1817,7 @@ app.get('/api/files', (req, res) => {
         url: `/shared/${cat}/${encodeURIComponent(f)}`,
         plays: counts[key(f)] || 0,
         artUrl: artMap ? (artMap[key(f)] ? `/data-files/album-art/${artMap[key(f)]}` : null) : undefined,
-        artist: cat === 'Music' ? readArtist(path.join(dir, f), stat) : undefined,
+        artist: isSongShelf(cat) ? readArtist(path.join(dir, f), stat) : undefined,
         thumbUrl: videoThumbs ? (videoThumbs[key(f)] ? `/data-files/video-thumbs/${videoThumbs[key(f)]}` : null)
           : fileThumbs ? (fileThumbs[key(f)] ? `/data-files/file-thumbs/${fileThumbs[key(f)]}` : null)
           : undefined
@@ -1849,13 +1859,13 @@ app.get('/api/files/:category/export', (req, res) => {
       const stat = fs.statSync(path.join(dir, f));
       if (!stat.isFile()) return null;
       const row = { 'Name': f };
-      if (category === 'Music') row['Artist'] = readArtist(path.join(dir, f), stat) || '';
+      if (isSongShelf(category)) row['Artist'] = readArtist(path.join(dir, f), stat) || '';
       row['Type'] = (extOf(f) || '').toUpperCase();
       if (category !== 'Pictures') row[countLabel] = counts[`${category}/${f}`] || 0;
       row['Size (MB)'] = Math.round((stat.size / (1024 * 1024)) * 100) / 100;
       row['Date Added'] = new Date(addedAt(stat)).toLocaleString();
       row['Date Modified'] = new Date(stat.mtimeMs).toLocaleString();
-      if (category === 'Music') row['Has Album Art'] = artMap[`${category}/${f}`] ? 'Yes' : 'No';
+      if (isSongShelf(category)) row['Has Album Art'] = artMap[`${category}/${f}`] ? 'Yes' : 'No';
       return row;
     })
     .filter(Boolean)
@@ -2671,7 +2681,7 @@ app.post('/api/files/:category/standardize-names', async (req, res) => {
     return target;
   }
 
-  if (category === 'Music') {
+  if (isSongShelf(category)) {
     const musicFiles = files.filter(f => MUSIC_EXT.has(extOf(f)));
     let corrected = 0;
 
@@ -2862,15 +2872,22 @@ app.post('/api/files/:category/remove-duplicates', async (req, res) => {
   let shrunkFreed = 0;
   if (req.body && req.body.shrunk && (category === 'Music' || category === 'Pictures')) {
     const left = fs.readdirSync(dir).filter(f => !f.startsWith('.'));
+    // Music's shrunk copies live on the Opus shelf now (older ones may still sit beside the MP3s)
+    const smallDir = category === 'Music' ? path.join(SHARED_ROOT, 'Opus') : dir;
+    const smallNames = category === 'Music'
+      ? [...left, ...(fs.existsSync(smallDir) ? fs.readdirSync(smallDir).filter(f => !f.startsWith('.')).map(f => '\u0000' + f) : [])]
+      : left;
     const small = category === 'Music' ? 'opus' : 'avif';
     const bigExt = category === 'Music' ? new Set(['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'])
                                         : new Set(['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp', 'bmp']);
     const stem = n => path.basename(n, path.extname(n)).replace(/ \(\d+\)$/, '').trim().toLowerCase();
     const smallByStem = {};
-    for (const n of left) if (extOf(n) === small) (smallByStem[stem(n)] ||= []).push(n);
+    // (names marked with a leading \u0000 are on the Opus shelf)
+    const where = n => n.startsWith('\u0000') ? path.join(smallDir, n.slice(1)) : path.join(dir, n);
+    for (const n of smallNames) if (extOf(n) === small) (smallByStem[stem(n.replace(/^\u0000/, ''))] ||= []).push(n);
     const lengthOf = n => {
       let f;
-      try { f = TagLib.File.createFromPath(path.join(dir, n)); return f.properties ? f.properties.durationMilliseconds : 0; }
+      try { f = TagLib.File.createFromPath(where(n)); return f.properties ? f.properties.durationMilliseconds : 0; }
       catch { return 0; } finally { if (f) f.dispose(); }
     };
     for (const n of left) {
@@ -2880,7 +2897,7 @@ app.post('/api/files/:category/remove-duplicates', async (req, res) => {
       if (category === 'Music') {
         const len = lengthOf(n);
         if (!len || !twins.some(t => Math.abs(lengthOf(t) - len) <= 2000)) continue;   // not the same song: leave it
-      } else if (!twins.some(t => isRealAvif(path.join(dir, t)))) continue;              // an empty or broken .avif: keep the photo
+      } else if (!twins.some(t => isRealAvif(where(t)))) continue;              // an empty or broken .avif: keep the photo
 
       try {
         const size = fs.statSync(path.join(dir, n)).size;
@@ -3044,11 +3061,14 @@ app.delete('/api/files/Music/album-art', (req, res) => {
   res.json({ cleared: count });
 });
 
+// a song on Music or on Music (Opus): the tag editor and "Get album art" find it on either
 function musicFilePath(name) {
   const safeName = sanitizeFilename(decodeURIComponent(name));
-  const filePath = path.join(SHARED_ROOT, 'Music', safeName);
-  if (!filePath.startsWith(path.join(SHARED_ROOT, 'Music')) || !fs.existsSync(filePath)) return null;
-  return { safeName, filePath };
+  for (const shelf of ['Music', 'Opus']) {
+    const filePath = path.join(SHARED_ROOT, shelf, safeName);
+    if (filePath.startsWith(path.join(SHARED_ROOT, shelf)) && fs.existsSync(filePath)) return { safeName, filePath, shelf };
+  }
+  return null;
 }
 
 // Reads a single track's own Artist/Title/Album/Track tags, for the manual
@@ -3102,7 +3122,7 @@ app.post('/api/files/Music/:name/fetch-art', async (req, res) => {
     const buffer = Buffer.from(await imgResp.arrayBuffer());
 
     const map = loadAlbumArtMap();
-    const key = albumArtKey('Music', loc.safeName);
+    const key = albumArtKey(loc.shelf, loc.safeName);
     const previous = map[key];
     const artFilename = crypto.randomBytes(12).toString('hex') + '.jpg';
     fs.writeFileSync(path.join(ALBUM_ART_DIR, artFilename), buffer);
@@ -3248,8 +3268,8 @@ app.post('/api/upload', (req, res) => {
     if (err) {
       return res.status(400).json({ error: err.message });
     }
-    if (req.body && req.body.category === 'Music') {
-      for (const f of (req.files || [])) saveEmbeddedArt(f.filename);
+    if (req.body && isSongShelf(req.body.category)) {
+      for (const f of (req.files || [])) saveEmbeddedArt(f.filename, shelfFor(req.body.category, f.filename));
     }
     res.json({ uploaded: (req.files || []).map(f => f.filename) });
   });
@@ -3257,13 +3277,13 @@ app.post('/api/upload', (req, res) => {
 
 // A song uploaded with its own cover inside (an MP3's ID3 picture, or the picture the shrinker carries into
 // an .opus file) shows that cover straight away, without fetching art online. A cover already on file wins.
-function saveEmbeddedArt(filename) {
+function saveEmbeddedArt(filename, shelf = 'Music') {
   let file;
   try {
     const map = loadAlbumArtMap();
-    const key = albumArtKey('Music', filename);
+    const key = albumArtKey(shelf, filename);
     if (map[key]) return;
-    file = TagLib.File.createFromPath(path.join(SHARED_ROOT, 'Music', filename));
+    file = TagLib.File.createFromPath(path.join(SHARED_ROOT, shelf, filename));
     const pic = (file.tag.pictures || []).find(p => p && p.data && p.data.length > 100);
     if (!pic) return;
     const type = String(pic.mimeType || '').toLowerCase();
@@ -5280,6 +5300,29 @@ app.post('/api/app/update', async (req, res) => {
     if (!res.headersSent) res.status(500).json({ error: `Update failed: ${String(err.message).replace(/\.+$/, '')}. Nothing was restarted.` });
   }
 });
+
+// Songs shrunk to Opus used to sit on Music next to the MP3s: they live on the Opus shelf now, with their
+// plays, album art and locked names moving with them.
+function moveOpusOffMusic() {
+  try {
+    const from = path.join(SHARED_ROOT, 'Music'), to = path.join(SHARED_ROOT, 'Opus');
+    fs.mkdirSync(to, { recursive: true });
+    let moved = 0;
+    for (const n of fs.readdirSync(from)) {
+      if (!/\.opus$/i.test(n) || n.startsWith('.')) continue;
+      let target = n, i = 1;
+      const ext = path.extname(n), base = path.basename(n, ext);
+      while (fs.existsSync(path.join(to, target))) target = `${base} (${i++})${ext}`;
+      try { fs.renameSync(path.join(from, n), path.join(to, target)); } catch { continue; }
+      migratePlayCount('Music', n, 'Opus', target);
+      migrateAlbumArt('Music', n, 'Opus', target);
+      migrateLockedName('Music', n, 'Opus', target);
+      moved++;
+    }
+    if (moved) console.log(`Moved ${moved} Opus song${moved === 1 ? '' : 's'} from Music to the Music (Opus) shelf.`);
+  } catch (e) { console.warn('Moving Opus songs to their shelf:', e.message); }
+}
+moveOpusOffMusic();
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   const ips = getLocalIPs();

@@ -1,8 +1,11 @@
 // The MIDI shelf is listed and played like Music (public/midi.js plays the files).
-const isMusicShelf = c => c === 'Music' || c === 'MIDI';
+const isMusicShelf = c => c === 'Music' || c === 'Opus' || c === 'MIDI';
+// the two shelves of songs: Music (MP3s etc.) and Music (Opus) (songs shrunk to Opus): artists, album art, tags
+const isSongShelf = c => c === 'Music' || c === 'Opus';
 const CATEGORY_COLORS = {
   Books: 'var(--cat-Books)',
   Music: 'var(--cat-Music)',
+  Opus: 'var(--cat-Opus)',
   MIDI: 'var(--cat-MIDI)',
   Videos: 'var(--cat-Videos)',
   Games: 'var(--cat-Games)',
@@ -14,7 +17,8 @@ const CATEGORY_COLORS = {
 // folder name on disk and what the API expects), but it's displayed to
 // the user as "Books / PDFs" — this map is just for that display text.
 const CATEGORY_LABELS = {
-  Books: 'Books / PDFs'
+  Books: 'Books / PDFs',
+  Opus: 'Music (Opus)'
 };
 function categoryLabel(name) {
   return CATEGORY_LABELS[name] || name;
@@ -356,9 +360,9 @@ function refreshMusicPlaylistIfPlaying() {
   state.musicPlaylistIndex = order.index;
 }
 
-const PLAY_COUNT_CATEGORIES = ['Music', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
+const PLAY_COUNT_CATEGORIES = ['Music', 'Opus', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
 // Shelves with the Export button (whole shelf as a .zip, or an Excel list).
-const EXPORT_CATEGORIES = ['Pictures', 'Music', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
+const EXPORT_CATEGORIES = ['Pictures', 'Music', 'Opus', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
 // "Recently added" = the last 30 days, newest first. If nothing's that new,
 // the newest few are shown instead of an empty shelf.
 const RECENT_DAYS = 30;
@@ -395,7 +399,7 @@ function updatePlayCountFilterLabels() {
   const opts = [['', allLabel]];
   if (isMusicShelf(state.category)) opts.push(['recent', 'Recently added']);
   opts.push(['mostplayed', mostLabel]);
-  if (state.category === 'Music') opts.push(['artist', 'Artist (A\u2013Z)']);
+  if (isSongShelf(state.category)) opts.push(['artist', 'Artist (A\u2013Z)']);
   opts.push(
     ['0', neverLabel],
     ['1+', `${verb} 1+ times`],
@@ -420,10 +424,10 @@ function renderHeader() {
   el('#imagineBtn').hidden = state.category !== 'Pictures';
   el('#toolActionBtn').hidden = true;
   el('#aboutInfoBtn').hidden = state.category !== 'Games' && state.category !== 'Programs';
-  el('#standardizeNamesBtn').hidden = (state.category !== 'Music' && state.category !== 'Videos') || n === 0;
+  el('#standardizeNamesBtn').hidden = (!isSongShelf(state.category) && state.category !== 'Videos') || n === 0;
   el('#fetchArtBtn').hidden = state.category !== 'Music' || n === 0;
   el('#shrinkShelfBtn').hidden = !(typeof shrinkAudio === 'function') || (state.category !== 'Music' && state.category !== 'Pictures') || n === 0;
-  el('#clearArtBtn').hidden = state.category !== 'Music' || !state.files.some(f => f.artUrl);
+  el('#clearArtBtn').hidden = !isSongShelf(state.category) || !state.files.some(f => f.artUrl);
   el('#exportListBtn').hidden = !EXPORT_CATEGORIES.includes(state.category) || state.files.length === 0;
   if (EXPORT_CATEGORIES.includes(state.category)) {
     const w = EXPORT_WORDS[state.category];
@@ -534,9 +538,9 @@ function renderContent() {
           </span>
           <span class="track-row-break"></span>
           <span class="track-meta">${f.sizeLabel}</span>
-          <span class="play-count">${formatPlayCount('Music', f.plays)}</span>
+          <span class="play-count">${formatPlayCount(state.category, f.plays)}</span>
           <a class="track-download" href="${f.url}" download title="Download">&#8681;</a>
-          ${state.category === 'Music' ? `<button class="track-edit-tags" data-name="${encodeURIComponent(f.name)}" title="Edit tags (Artist, Title, Album)">&#127925;</button>` : ''}
+          ${isSongShelf(state.category) ? `<button class="track-edit-tags" data-name="${encodeURIComponent(f.name)}" title="Edit tags (Artist, Title, Album)">&#127925;</button>` : ''}
           <button class="track-rename" data-name="${encodeURIComponent(f.name)}" title="Rename">&#127991;</button>
           <button class="track-remove" data-name="${encodeURIComponent(f.name)}" title="Remove">&times;</button>
         </div>
@@ -792,7 +796,7 @@ async function renameFile(name) {
 // result back into the file's own tags.
 async function standardizeNames() {
   const label = state.category.toLowerCase();
-  const isMusic = state.category === 'Music';
+  const isMusic = isSongShelf(state.category);
   const confirmMsg = isMusic
     ? `Clean up messy music filenames and tags? This parses each filename into an Artist / Title / Track guess (existing tags win if a file is already tagged), writes that back into the file's own tags, and renames it to "Artist - Title.ext" — e.g. turning "YTDown.com_YouTube_AC-DC-Moneytalks-Official-HD-Video_Media_2lqdErI9uss_009_128k.mp3" into "AC/DC - Moneytalks.mp3". Names that already look clean are left alone, and so is any file you've manually renamed yourself. This changes files on the host machine.`
     : `Clean up messy ${label} filenames? This strips out downloader junk (site names, video IDs, sequence numbers, quality tags like "1080p") wherever it shows up in the name and tidies the rest into Title Case — e.g. turning "Media_xo1VInw-SKc_Rachel-Platten-Fight-Song_001_1080p.mp4" into "Rachel Platten Fight Song.mp4". Names that already look clean are left alone, and so is any file you've manually renamed yourself. This renames files on the host machine.`;
@@ -2600,7 +2604,7 @@ function playTrackFile(f, renderedIndex) {
     const row = document.querySelector(`.track-row[data-index="${renderedIndex}"]`);
     if (row) row.classList.add('playing');
   }
-  recordPlay(String(f.url || '').startsWith('/shared/MIDI/') ? 'MIDI' : 'Music', f.name);
+  { const u = String(f.url || ''); recordPlay(u.startsWith('/shared/MIDI/') ? 'MIDI' : u.startsWith('/shared/Opus/') ? 'Opus' : 'Music', f.name); }
 }
 
 // Advances to the next track in the snapshotted playlist, if there is one.
@@ -2981,6 +2985,7 @@ const exportBackdrop = el('#exportBackdrop');
 const EXPORT_WORDS = {
   Pictures: ['pictures', 'picture', 'pictures', 'Picture list', 'names, sizes and dates — no image files'],
   Music:    ['music', 'song', 'songs', 'Song list', 'names, artists, plays, sizes and dates — no audio'],
+  Opus:     ['Opus music', 'song', 'songs', 'Song list', 'names, artists, plays, sizes and dates — no audio'],
   MIDI:     ['MIDI files', 'MIDI file', 'MIDI files', 'MIDI list', 'names, plays, sizes and dates — no MIDI files'],
   Videos:   ['videos', 'video', 'videos', 'Video list', 'names, plays, sizes and dates — no video files'],
   Games:    ['games', 'game', 'games', 'Game list', 'names, plays, sizes and dates — no game files'],
@@ -3631,7 +3636,7 @@ let shrinkSaved = 0;
 function shrinkOn() { try { return localStorage.getItem('shelf.shrink') !== 'off'; } catch { return true; } }
 function shrinkKind(file, category) {
   if (!shrinkOn() || typeof shrinkAudio !== 'function') return null;
-  if (category === 'Music' && canShrink(file)) return 'music';
+  if (isSongShelf(category) && canShrink(file)) return 'music';
   if (category === 'Pictures' && isPhoto(file) && !/\.(gif|svg|avif)$/i.test(file.name)) return 'photo';
   return null;
 }
@@ -3662,7 +3667,7 @@ function openShrinkModal() {
   const cat = state.category, files = shrinkCandidates(cat);
   el('#shrinkTitle').textContent = cat === 'Music' ? 'Shrink music' : 'Shrink pictures';
   el('#shrinkIntro').textContent = cat === 'Music'
-    ? 'Songs become Opus at 48 kbps: about 60% smaller, sounding about the same, with title, artist, album and cover art kept.'
+    ? 'Songs become Opus at 48 kbps: about 60% smaller, sounding about the same, with title, artist, album and cover art kept. The shrunk songs go on the Music (Opus) shelf.'
     : 'Photos become AVIF, 2048 px on the longer side: often 90% smaller or more, still sharp on a laptop or TV. iPhone HEIC photos too.';
   el('#shrinkList').innerHTML = files.length
     ? files.map((f, i) => `<label class="shrink-row"><input type="checkbox" checked data-i="${i}" data-size="${f.size}"><span class="shrink-name">${escapeHtml(f.name)}</span><span class="shrink-st">${shrinkSize(f.size)}</span></label>`).join('')

@@ -129,7 +129,7 @@
   }
 
   // ---- Remote admin over 900MHz: connect to a board with its admin password ----
-  const SHELVES = ['Pictures', 'Music', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
+  const SHELVES = ['Pictures', 'Music', 'Opus', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
   function openRemote(dev) {
     const R = { dev, session: null, busy: null, st: null, out: '', err: '' };
     const ov = document.createElement('div');
