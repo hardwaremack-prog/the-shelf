@@ -217,6 +217,9 @@ const el = (sel) => document.querySelector(sel);
 async function loadCategories() {
   const res = await fetch('/api/categories');
   const cats = await res.json();
+  // in the usual order (Music (Opus) right after Music), whatever order the board lists them in
+  const rank = n => { const i = ALL_CATEGORIES.indexOf(n); return i < 0 ? 99 : i; };
+  cats.sort((a, b) => rank(a.name) - rank(b.name));
   const nav = el('#shelfNav');
   nav.innerHTML = '';
   cats.forEach(cat => {
